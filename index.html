@@ -1,0 +1,1753 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CrimewaTHch · LYLC BFF Leaderboard</title>
+<meta name="description" content="Live leaderboard for the LYLC BFF Challenge.">
+<!-- Left empty on purpose: the sheet id must not live in a public repo.
+     The deploy workflow fills this in from the SHEET_URL repository secret.
+     Leave it blank and the board shows demo data until someone opens it with
+     ?sheet=<sheet id>. See README. -->
+<meta name="crimewathch:sheet" content="">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23060A14'/%3E%3Cg fill='none' stroke='%23FF2A3D' stroke-width='2.4'%3E%3Ccircle cx='16' cy='16' r='8.5'/%3E%3Cpath d='M16 2.5v5M16 24.5v5M2.5 16h5M24.5 16h5'/%3E%3C/g%3E%3Ccircle cx='16' cy='16' r='2.6' fill='%23FF2A3D'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@0,700;0,800;0,900;1,800;1,900&family=Orbitron:wght@500;700;900&family=Permanent+Marker&family=Share+Tech+Mono&display=swap">
+<style>
+/* ============================================================
+   CrimewaTHch — tokens
+   Hex values come straight off the printed collateral so the
+   board matches the posters; oklch() is used only for derived
+   tints where perceptual control matters.
+   ============================================================ */
+:root{
+  --night:#060A14;
+  --panel:12 20 36;              /* rgb triplet, alpha applied per use */
+  --red:#FF2A3D;
+  --blue:#2F6BFF;
+  --evidence:#FFC21A;
+  --kraft:#E8DCC2;
+  --ink:#F2F4F8;
+  --muted:#8C95A8;
+  --amber:#FFAF24;
+
+  --chrome:linear-gradient(177deg,#fff 0%,#F2F5F8 20%,#C9CED6 43%,#8E96A2 53%,#D6DBE2 66%,#fff 100%);
+  --outline:#04070E;
+
+  --f-display:'Barlow Condensed','Arial Narrow',system-ui,sans-serif;
+  --f-label:'Orbitron','Barlow Condensed',system-ui,sans-serif;
+  --f-mono:'Share Tech Mono',ui-monospace,'Cascadia Mono',Consolas,monospace;
+  --f-marker:'Permanent Marker','Comic Sans MS',cursive;
+
+  --r-panel:20px;
+  --r-card:16px;
+  --gut:clamp(16px,3.2vw,40px);
+
+  --e-out:cubic-bezier(.16,1,.3,1);          /* ease-out-expo-ish */
+  --e-quint:cubic-bezier(.22,1,.36,1);
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{
+  margin:0;
+  background:var(--night);
+  color:var(--ink);
+  font-family:var(--f-display);
+  font-size:16px;
+  line-height:1.5;
+  overflow-x:hidden;
+  min-height:100vh;
+}
+img{max-width:100%;display:block}
+button{font:inherit;color:inherit;background:none;border:0;cursor:pointer}
+table{border-collapse:separate;border-spacing:0}
+
+.sr-only{
+  position:absolute;width:1px;height:1px;padding:0;margin:-1px;
+  overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;border:0;
+}
+
+:where(a,button,input,[tabindex]):focus-visible{
+  outline:2px solid var(--evidence);
+  outline-offset:3px;
+  border-radius:6px;
+}
+
+/* ============================================================
+   Motion — Lenis smooth scroll + scroll reveals
+   ============================================================ */
+/* Lenis runtime requirements (inlined from lenis.css) */
+html.lenis,html.lenis body{height:auto}
+.lenis.lenis-smooth [data-lenis-prevent]{overscroll-behavior:contain}
+.lenis.lenis-stopped{overflow:clip}
+.lenis.lenis-smooth iframe{pointer-events:none}
+
+/* The hidden state is only armed once JS adds .has-reveal, so with JS off or
+   the observer never firing, everything is simply visible. */
+/* :not(tr) matters — without it rows inherit the translate AND this 900ms
+   transition, which outranks the FLIP transition and delays every reorder by
+   the reveal's stagger. Rows are handled separately, below. */
+html.has-reveal .reveal:not(tr){opacity:0;transform:translateY(28px)}
+html.has-reveal .reveal:not(tr).is-in{
+  opacity:1;transform:none;
+  transition:opacity .9s var(--e-out),transform .9s var(--e-out);
+  transition-delay:var(--d,0ms);
+}
+/* Rows fade only, and via an ANIMATION rather than a transition. FLIP owns
+   `transition: transform` on <tr>; giving the reveal its own transition would
+   either clobber that (rows snap instead of sliding) or apply the reveal's
+   stagger delay to every later reorder. An animation leaves transition alone. */
+html.has-reveal tr.reveal{opacity:0}
+html.has-reveal tr.reveal.is-in{animation:rowIn .62s var(--e-out) var(--d,0ms) both}
+@keyframes rowIn{from{opacity:0}to{opacity:1}}
+
+/* ============================================================
+   Background: navy halftone wave, trading siren glows,
+   scanlines, vignette, fingerprint watermark
+   ============================================================ */
+.bg{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden}
+.bg>*{position:absolute;inset:0}
+
+.bg-halftone{
+  background-image:radial-gradient(circle at center,rgba(150,172,214,.30) 1.05px,transparent 1.5px);
+  background-size:13px 13px;
+  -webkit-mask-image:radial-gradient(135% 72% at 50% -14%,#000 6%,rgba(0,0,0,.55) 44%,transparent 80%);
+          mask-image:radial-gradient(135% 72% at 50% -14%,#000 6%,rgba(0,0,0,.55) 44%,transparent 80%);
+}
+.bg-halftone2{
+  background-image:radial-gradient(circle at center,rgba(120,146,196,.22) 1.6px,transparent 2.1px);
+  background-size:27px 27px;
+  -webkit-mask-image:radial-gradient(120% 56% at 50% 104%,#000 0%,transparent 72%);
+          mask-image:radial-gradient(120% 56% at 50% 104%,#000 0%,transparent 72%);
+}
+.bg-red{
+  background:radial-gradient(58% 46% at 6% -8%,rgba(255,42,61,.34),rgba(255,42,61,.08) 46%,transparent 72%);
+  animation:sirenA 11s ease-in-out infinite;
+}
+.bg-blue{
+  background:radial-gradient(58% 46% at 94% -8%,rgba(47,107,255,.34),rgba(47,107,255,.08) 46%,transparent 72%);
+  animation:sirenB 11s ease-in-out infinite;
+}
+@keyframes sirenA{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes sirenB{0%,100%{opacity:.3}50%{opacity:1}}
+
+.bg-scan{
+  background:repeating-linear-gradient(180deg,rgba(255,255,255,.030) 0 1px,transparent 1px 3px);
+  opacity:.75;
+}
+.bg-vignette{
+  background:radial-gradient(125% 95% at 50% 36%,transparent 50%,rgba(1,3,7,.72) 100%);
+}
+.bg-print{
+  top:auto;bottom:-8vmax;left:auto;right:-6vmax;
+  width:62vmax;height:62vmax;
+  opacity:.014;
+  background:no-repeat center/contain url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'%3E%3Cg fill='none' stroke='%23FFFFFF' stroke-width='2.4' stroke-linecap='round'%3E%3Cpath d='M100 36c-26 0-46 22-46 50 0 16 4 30 10 44'/%3E%3Cpath d='M100 50c-19 0-33 16-33 37 0 15 4 27 9 39'/%3E%3Cpath d='M100 64c-12 0-21 11-21 24 0 14 4 25 8 35'/%3E%3Cpath d='M100 78c-5 0-9 5-9 11 0 11 3 20 6 29'/%3E%3Cpath d='M100 36c26 0 46 22 46 50 0 16-4 30-10 44'/%3E%3Cpath d='M100 50c19 0 33 16 33 37 0 15-4 27-9 39'/%3E%3Cpath d='M100 64c12 0 21 11 21 24 0 14-4 25-8 35'/%3E%3Cpath d='M100 92c4 0 7 4 7 9 0 8-2 15-4 22'/%3E%3C/g%3E%3C/svg%3E");
+}
+
+/* ============================================================
+   Chrome type treatment
+   ============================================================ */
+/* The red/blue split uses filter, NOT text-shadow: a text-shadow paints on top
+   of a background-clip:text gradient and washes the glyphs pink. A drop-shadow
+   filter paints behind the element, so the chrome fill stays silver. */
+.chrome{
+  background:var(--chrome);
+  -webkit-background-clip:text;background-clip:text;
+  color:var(--ink);
+  filter:
+    drop-shadow(-1.5px 0 0 rgba(255,42,61,.5))
+    drop-shadow(1.5px 0 0 rgba(47,107,255,.45))
+    drop-shadow(0 0 1.1px rgba(4,7,14,.95))
+    drop-shadow(0 1.5px 0 rgba(4,7,14,.55));
+}
+@supports ((-webkit-background-clip:text) or (background-clip:text)){
+  .chrome{color:transparent}
+}
+
+/* ============================================================
+   Shell
+   ============================================================ */
+.shell{
+  position:relative;z-index:1;
+  max-width:1480px;margin-inline:auto;
+  padding:clamp(18px,2.4vw,30px) var(--gut) 0;
+}
+
+/* ---------- 1. Top bar ---------- */
+.topbar{
+  display:flex;align-items:flex-start;justify-content:space-between;
+  gap:20px;flex-wrap:wrap;
+}
+.brand{position:relative;padding-left:2px}
+/* Sits behind the wordmark rather than beside it, so it never clips off-canvas. */
+.reticle{
+  position:absolute;left:28%;top:42%;translate:-50% -50%;
+  width:clamp(84px,10vw,136px);height:clamp(84px,10vw,136px);
+  opacity:.2;pointer-events:none;z-index:-1;
+}
+.topbar{isolation:isolate}
+.wordmark{
+  position:relative;margin:0;
+  font-family:var(--f-display);font-weight:900;font-style:italic;
+  font-size:clamp(34px,5.6vw,66px);line-height:.9;letter-spacing:-.012em;
+}
+.wordmark .th{
+  color:var(--red);
+  background:none;-webkit-background-clip:border-box;background-clip:border-box;
+  text-shadow:0 0 22px rgba(255,42,61,.6),0 0 3px rgba(255,42,61,.9);
+}
+.brand-sub{
+  margin:7px 0 0;
+  font-family:var(--f-label);font-size:clamp(8.5px,.84vw,10.5px);font-weight:700;
+  letter-spacing:.34em;text-transform:uppercase;color:var(--muted);
+}
+
+/* CCTV live chip */
+.cctv{
+  display:flex;align-items:center;gap:12px;flex-wrap:wrap;
+  padding:9px 15px;border-radius:12px;
+  background:rgba(var(--panel)/.82);
+  border:1px solid rgba(201,206,214,.16);
+  backdrop-filter:blur(12px);
+  box-shadow:inset 10px 0 22px -20px var(--blue),inset -10px 0 22px -20px var(--red);
+}
+.cctv svg{width:17px;height:17px;flex:none;color:var(--muted)}
+.rec{
+  display:inline-flex;align-items:center;gap:6px;
+  font-family:var(--f-label);font-size:9.5px;font-weight:700;letter-spacing:.2em;color:var(--red);
+}
+.rec i{width:7px;height:7px;border-radius:50%;background:var(--red);box-shadow:0 0 9px var(--red);animation:blink 1.5s steps(1,end) infinite}
+@keyframes blink{0%,49%{opacity:1}50%,100%{opacity:.15}}
+.sync{font-family:var(--f-mono);font-size:12px;color:var(--muted);letter-spacing:.06em;white-space:nowrap}
+.cctv.is-lost{border-color:rgba(255,175,36,.5);box-shadow:inset 0 0 26px -14px var(--amber)}
+.cctv.is-lost .rec{color:var(--amber)}
+.cctv.is-lost .rec i{background:var(--amber);box-shadow:0 0 9px var(--amber)}
+
+.chip{
+  font-family:var(--f-label);font-size:9px;font-weight:700;letter-spacing:.2em;
+  padding:5px 9px;border-radius:6px;white-space:nowrap;
+}
+.chip--demo{background:rgba(255,194,26,.14);color:var(--evidence);border:1px solid rgba(255,194,26,.42)}
+.chip--local{background:rgba(47,107,255,.16);color:#9DBAFF;border:1px solid rgba(47,107,255,.5)}
+.chip[hidden]{display:none}
+
+/* ---------- 2. Tagline strip ---------- */
+.taglines{
+  display:grid;grid-template-columns:repeat(3,1fr);gap:16px;
+  margin:clamp(16px,2.2vw,26px) 0 0;
+  padding:clamp(12px,1.6vw,18px) 0;
+  border-top:1px solid rgba(201,206,214,.10);
+  border-bottom:1px solid rgba(201,206,214,.10);
+}
+.tagline{
+  font-family:var(--f-label);font-size:clamp(8px,.78vw,10px);font-weight:700;
+  letter-spacing:.3em;text-transform:uppercase;color:var(--muted);
+}
+.tagline:nth-child(2){text-align:center;color:#B8C0CE}
+.tagline:nth-child(3){text-align:right}
+.tagline::after{
+  content:"";display:block;width:26px;height:2px;margin-top:8px;
+  background:var(--red);border-radius:2px;
+}
+.tagline:nth-child(2)::after{margin-inline:auto}
+.tagline:nth-child(3)::after{margin-left:auto}
+
+/* ---------- 3. Header bar ---------- */
+.headerbar{
+  display:grid;grid-template-columns:minmax(0,1fr) auto auto;
+  align-items:center;gap:clamp(14px,2vw,28px);
+  margin:clamp(18px,2.4vw,28px) 0 0;
+  padding:clamp(14px,1.8vw,20px) clamp(16px,2vw,24px);
+  border-radius:var(--r-panel);
+  background:rgba(var(--panel)/.80);
+  border:1px solid rgba(201,206,214,.13);
+  backdrop-filter:blur(14px) saturate(118%);
+  box-shadow:inset 16px 0 32px -26px var(--blue),inset -16px 0 32px -26px var(--red),0 22px 56px -34px #000;
+}
+.hb-left{display:flex;align-items:center;gap:14px;min-width:0}
+.badge{
+  flex:none;width:clamp(36px,3.4vw,46px);height:clamp(36px,3.4vw,46px);
+  display:grid;place-items:center;border-radius:50%;
+  background:radial-gradient(circle at 34% 28%,#FFE79A,var(--evidence) 52%,#C98900);
+  box-shadow:0 0 0 1px rgba(255,255,255,.3),0 6px 20px -8px rgba(255,194,26,.75);
+}
+.badge svg{width:60%;height:60%;color:#3A2600}
+.hb-title{
+  margin:0;font-weight:900;font-style:italic;
+  font-size:clamp(17px,1.9vw,25px);line-height:1.05;letter-spacing:-.005em;
+  text-transform:uppercase;
+}
+.hb-sub{
+  margin:3px 0 0;font-family:var(--f-label);font-size:clamp(8px,.76vw,9.5px);
+  font-weight:500;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);
+}
+.statpill{
+  font-family:var(--f-label);font-size:clamp(9px,.84vw,11px);font-weight:700;
+  letter-spacing:.17em;white-space:nowrap;
+  padding:10px 16px;border-radius:999px;
+  color:var(--ink);
+  background:linear-gradient(180deg,rgba(47,107,255,.2),rgba(47,107,255,.07));
+  border:1px solid rgba(47,107,255,.42);
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.1);
+}
+.statpill b{color:var(--evidence);font-weight:700}
+
+.search{position:relative;display:flex;align-items:center}
+.search svg{position:absolute;left:12px;width:15px;height:15px;color:var(--muted);pointer-events:none}
+#q{
+  width:clamp(170px,19vw,250px);
+  padding:11px 44px 11px 34px;
+  font-family:var(--f-mono);font-size:13px;
+  color:var(--ink);background:rgba(6,10,20,.72);
+  border:1px solid rgba(201,206,214,.2);border-radius:10px;
+}
+#q::placeholder{color:#6C7689}
+#q{transition:border-color .4s,background-color .4s,box-shadow .4s}
+#q:hover{border-color:rgba(201,206,214,.34)}
+.kbd{
+  position:absolute;right:10px;
+  font-family:var(--f-mono);font-size:11px;color:var(--muted);
+  padding:2px 7px;border:1px solid rgba(201,206,214,.24);border-radius:5px;
+  background:rgba(255,255,255,.05);pointer-events:none;
+}
+#q:not(:placeholder-shown)~.kbd{opacity:0}
+
+/* ---------- Admin drop zone ---------- */
+.dropzone{
+  margin:18px 0 0;padding:22px;
+  border:2px dashed rgba(255,194,26,.42);border-radius:var(--r-panel);
+  background:rgba(255,194,26,.045);
+  text-align:center;
+}
+.dropzone.is-over{background:rgba(255,194,26,.13);border-color:var(--evidence)}
+.dropzone p{
+  margin:0;font-family:var(--f-label);font-size:11px;font-weight:700;
+  letter-spacing:.2em;text-transform:uppercase;color:var(--evidence);
+}
+.dz-actions{display:flex;gap:10px;justify-content:center;flex-wrap:wrap;margin-top:14px}
+.dz-btn{
+  font-family:var(--f-label);font-size:9.5px;font-weight:700;letter-spacing:.16em;
+  text-transform:uppercase;padding:9px 15px;border-radius:8px;
+  border:1px solid rgba(201,206,214,.3);color:var(--ink);
+}
+.dz-btn{transition:border-color .4s,color .4s,background-color .4s}
+.dz-btn:hover{border-color:var(--evidence);color:var(--evidence)}
+.dropzone{transition:background-color .4s,border-color .4s}
+
+/* ============================================================
+   4. Podium
+   ============================================================ */
+.podium-wrap{position:relative;margin:clamp(26px,3.6vw,46px) 0 0;padding:clamp(14px,2vw,26px) 0 0}
+/* HUD viewfinder brackets */
+.podium-wrap::before,.podium-wrap::after,
+.podium-wrap>.hud-b::before,.podium-wrap>.hud-b::after{
+  content:"";position:absolute;width:26px;height:26px;pointer-events:none;
+  border-color:rgba(201,206,214,.42);border-style:solid;border-width:0;
+}
+.podium-wrap::before{top:0;left:-6px;border-top-width:2px;border-left-width:2px}
+.podium-wrap::after{top:0;right:-6px;border-top-width:2px;border-right-width:2px}
+.podium-wrap>.hud-b{position:absolute;inset:0;pointer-events:none}
+.podium-wrap>.hud-b::before{bottom:0;left:-6px;border-bottom-width:2px;border-left-width:2px}
+.podium-wrap>.hud-b::after{bottom:0;right:-6px;border-bottom-width:2px;border-right-width:2px}
+
+.podium{
+  position:relative;
+  display:grid;grid-template-columns:1fr 1.14fr 1fr;
+  gap:clamp(12px,1.8vw,30px);
+  align-items:end;
+}
+.string{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3;overflow:visible}
+
+/* Cap card width so the mugshot and the plinth read as one object rather than
+   a small square floating over a very wide box. */
+.card{position:relative;display:flex;flex-direction:column;min-width:0;width:100%;max-width:324px;margin-inline:auto}
+.card--1{max-width:392px}
+.card--1{grid-column:2;grid-row:1}
+.card--2{grid-column:1;grid-row:1}
+.card--3{grid-column:3;grid-row:1}
+.card--1{padding-bottom:clamp(26px,3vw,40px)}
+.card--2,.card--3{padding-bottom:0}
+
+/* siren light bar above #1 */
+.sirenbar{
+  position:relative;height:9px;margin:0 auto 12px;width:68%;
+  border-radius:999px;overflow:hidden;
+  background:linear-gradient(90deg,var(--red) 0 50%,var(--blue) 50% 100%);
+  box-shadow:0 0 26px -2px rgba(255,42,61,.75),0 0 26px -2px rgba(47,107,255,.75);
+  animation:sirenbar 1.9s ease-in-out infinite;
+}
+@keyframes sirenbar{0%,100%{box-shadow:0 0 30px 1px rgba(255,42,61,.9),0 0 10px -4px rgba(47,107,255,.5)}50%{box-shadow:0 0 10px -4px rgba(255,42,61,.5),0 0 30px 1px rgba(47,107,255,.9)}}
+
+/* mugshot */
+.mug{
+  position:relative;aspect-ratio:1;
+  width:min(100%,clamp(132px,13.5vw,186px));margin-inline:auto;
+  border-radius:var(--r-card);overflow:hidden;
+  border:1px solid rgba(201,206,214,.22);
+  background:linear-gradient(180deg,#121D32,#0A1120);
+  box-shadow:0 20px 50px -26px #000,inset 0 0 0 1px rgba(255,255,255,.04);
+}
+.card--1 .mug{width:min(100%,clamp(158px,16vw,218px))}
+.mug img{width:100%;height:100%;object-fit:cover}
+/* Scale the contents inside the overflow-hidden frame, not the frame itself,
+   so the red-string pin anchors stay put. */
+.mug img,.mug .initials{transition:transform .6s var(--e-out)}
+.mug:hover img,.mug:hover .initials{transform:scale(1.08)}
+.mug{transition:box-shadow .4s,border-color .4s}
+.mug--chart{
+  background-image:
+    repeating-linear-gradient(180deg,rgba(232,220,194,.085) 0 1px,transparent 1px 11px),
+    repeating-linear-gradient(180deg,rgba(232,220,194,.20) 0 1.5px,transparent 1.5px 44px),
+    linear-gradient(180deg,#131F36,#0A1120);
+}
+.mug--chart::after{
+  content:"";position:absolute;inset:0;
+  background:radial-gradient(70% 60% at 50% 32%,rgba(255,255,255,.07),transparent 70%);
+}
+.initials{
+  position:absolute;inset:0;display:grid;place-items:center;
+  font-weight:900;font-style:italic;
+  font-size:clamp(34px,5.4vw,74px);line-height:1;letter-spacing:-.02em;
+  color:rgba(242,244,248,.9);
+  text-shadow:0 3px 0 rgba(4,7,14,.6);
+}
+.card--2 .initials,.card--3 .initials{font-size:clamp(28px,4.2vw,56px)}
+
+/* red evidence tag pinned to a corner */
+.suspect-tag{
+  position:absolute;top:11px;left:11px;z-index:2;
+  display:flex;align-items:center;gap:6px;
+  padding:5px 10px 5px 8px;border-radius:4px;
+  background:linear-gradient(180deg,#FF3E50,#D2101F);
+  border:1px solid rgba(255,255,255,.3);
+  font-family:var(--f-label);font-size:8.5px;font-weight:700;letter-spacing:.14em;color:#fff;
+  box-shadow:0 6px 16px -8px rgba(0,0,0,.9);
+  rotate:-3deg;
+}
+.suspect-tag::before{
+  content:"";width:5px;height:5px;border-radius:50%;
+  background:#fff;box-shadow:0 0 0 2px rgba(0,0,0,.28);
+}
+
+/* names */
+.card-name{
+  margin:14px 2px 0;text-align:center;
+  font-weight:900;font-size:clamp(18px,2.1vw,30px);line-height:1.08;
+  letter-spacing:-.01em;text-transform:uppercase;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.card--2 .card-name,.card--3 .card-name{font-size:clamp(15px,1.6vw,23px)}
+.card-partner{
+  margin:3px 2px 0;text-align:center;
+  font-family:var(--f-label);font-size:clamp(8px,.78vw,10px);font-weight:500;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--muted);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+
+/* plinth */
+.plinth{
+  position:relative;margin-top:14px;padding:clamp(14px,1.7vw,20px) clamp(12px,1.5vw,18px);
+  border-radius:var(--r-card);
+  background:rgba(var(--panel)/.82);
+  border:1px solid rgba(201,206,214,.14);
+  backdrop-filter:blur(12px);
+  box-shadow:inset 14px 0 30px -24px var(--blue),inset -14px 0 30px -24px var(--red),0 20px 46px -30px #000;
+  text-align:center;
+}
+.card--1 .plinth{padding-block:clamp(18px,2.1vw,26px)}
+.tent{
+  position:relative;width:38px;height:33px;margin:0 auto;
+  display:grid;place-items:end center;padding-bottom:2px;
+  background:linear-gradient(180deg,#FFDE6A,#E9A400);
+  clip-path:polygon(50% 0,100% 100%,0 100%);
+  filter:drop-shadow(0 5px 10px rgba(0,0,0,.6));
+}
+.tent span{
+  font-family:var(--f-label);font-size:13px;font-weight:900;color:#3A2600;line-height:1;
+}
+.role{
+  margin:11px 0 0;
+  font-family:var(--f-label);font-size:clamp(8px,.8vw,10px);font-weight:700;
+  letter-spacing:.22em;text-transform:uppercase;color:var(--evidence);
+}
+.card--2 .role,.card--3 .role{color:#B8C0CE}
+.divider{height:1px;margin:13px -4px;background:linear-gradient(90deg,transparent,rgba(201,206,214,.26),transparent)}
+.score{
+  font-weight:900;font-style:italic;line-height:.92;
+  font-size:clamp(34px,4.6vw,64px);letter-spacing:-.02em;
+  font-variant-numeric:tabular-nums;
+}
+.card--2 .score,.card--3 .score{font-size:clamp(27px,3.4vw,46px)}
+.score-label{
+  margin:5px 0 0;
+  font-family:var(--f-label);font-size:9px;font-weight:700;letter-spacing:.28em;color:var(--muted);
+}
+
+/* flashes */
+.card.is-flash .plinth{animation:flashScore .9s var(--e-out)}
+@keyframes flashScore{0%{box-shadow:inset 0 0 0 2px var(--evidence),0 0 34px -6px rgba(255,194,26,.8)}100%{}}
+.card.is-siren .mug{animation:sirenFlash 1.1s ease-in-out 2}
+@keyframes sirenFlash{0%,100%{box-shadow:0 20px 50px -26px #000}25%{box-shadow:0 0 0 3px var(--red),0 0 40px -4px var(--red)}75%{box-shadow:0 0 0 3px var(--blue),0 0 40px -4px var(--blue)}}
+.card.is-match .mug{box-shadow:0 0 0 3px var(--evidence),0 0 40px -6px rgba(255,194,26,.75)}
+.podium.has-match .card:not(.is-match){opacity:.3}
+
+/* Entry is handled by the scroll reveal, not an on-load drop-in. */
+
+/* AT LARGE placeholder */
+.card--empty .mug{
+  display:grid;place-items:center;
+  background-image:repeating-linear-gradient(180deg,rgba(232,220,194,.10) 0 1px,transparent 1px 10px),linear-gradient(180deg,#0E1728,#080E1B);
+  border-style:dashed;border-color:rgba(201,206,214,.22);
+}
+.card--empty .mug svg{width:50%;height:50%;color:rgba(201,206,214,.2)}
+.sticker{
+  position:absolute;left:50%;top:58%;translate:-50% 0;rotate:-6deg;
+  padding:7px 15px;border-radius:7px;
+  background:#101A2C;border:3px solid #fff;
+  box-shadow:0 8px 22px -10px #000;
+}
+.sticker span{
+  font-family:var(--f-display);font-weight:900;font-style:italic;font-size:17px;
+  letter-spacing:.04em;color:var(--kraft);
+  text-shadow:1.4px 0 var(--outline),-1.4px 0 var(--outline),0 1.4px var(--outline),0 -1.4px var(--outline);
+}
+.card--empty .plinth{opacity:.5}
+
+/* ---------- 5. Status pill ---------- */
+.leadpill{
+  position:absolute;left:50%;bottom:0;translate:-50% 50%;z-index:4;
+  max-width:min(92%,440px);
+  padding:10px 20px;border-radius:999px;
+  background:linear-gradient(180deg,rgba(18,28,48,.97),rgba(9,15,28,.97));
+  border:1px solid rgba(255,194,26,.45);
+  box-shadow:0 14px 36px -16px #000,0 0 30px -12px rgba(255,194,26,.5);
+  font-family:var(--f-label);font-size:clamp(8.5px,.84vw,10.5px);font-weight:700;
+  letter-spacing:.14em;text-transform:uppercase;text-align:center;white-space:nowrap;
+  overflow:hidden;text-overflow:ellipsis;
+}
+.leadpill b{color:var(--evidence)}
+
+/* ---------- Pre-event / empty states ---------- */
+.state{
+  margin:clamp(26px,3.6vw,46px) 0 0;padding:clamp(30px,5vw,64px) var(--gut);
+  border-radius:var(--r-panel);text-align:center;
+  background:rgba(var(--panel)/.80);
+  border:1px solid rgba(201,206,214,.13);
+  backdrop-filter:blur(14px);
+  box-shadow:inset 16px 0 32px -26px var(--blue),inset -16px 0 32px -26px var(--red);
+}
+.state h2{
+  margin:0;font-weight:900;font-style:italic;text-transform:uppercase;
+  font-size:clamp(26px,5vw,58px);line-height:.98;letter-spacing:-.015em;
+}
+.state p{
+  margin:14px 0 0;font-family:var(--f-label);font-size:clamp(9px,.9vw,11px);
+  font-weight:700;letter-spacing:.24em;text-transform:uppercase;color:var(--muted);
+}
+.state .tape{
+  display:inline-block;margin-bottom:22px;padding:8px 20px;rotate:-1.6deg;
+  background:var(--kraft);color:#2A2114;
+  font-family:var(--f-label);font-size:10px;font-weight:700;letter-spacing:.24em;text-transform:uppercase;
+  box-shadow:0 8px 22px -12px #000;
+}
+
+/* ============================================================
+   6. Lineup panel
+   ============================================================ */
+.lineup-panel{
+  position:relative;overflow:hidden;
+  margin:clamp(34px,4.6vw,62px) 0 0;
+  padding:clamp(18px,2.2vw,28px) clamp(16px,2vw,26px) clamp(20px,2.4vw,30px);
+  border-radius:var(--r-panel);
+  background:rgba(var(--panel)/.80);
+  border:1px solid rgba(201,206,214,.13);
+  backdrop-filter:blur(14px) saturate(118%);
+  box-shadow:inset 16px 0 32px -26px var(--blue),inset -16px 0 32px -26px var(--red),0 22px 56px -34px #000;
+}
+.stamp{
+  position:absolute;right:14px;bottom:16px;rotate:-14deg;pointer-events:none;
+  font-family:var(--f-label);font-size:clamp(28px,4.4vw,56px);font-weight:900;
+  letter-spacing:.1em;color:rgba(255,42,61,.11);
+  border:4px solid rgba(255,42,61,.11);border-radius:10px;padding:6px 18px;
+  text-transform:uppercase;
+}
+.lineup-head{
+  display:flex;align-items:flex-end;justify-content:space-between;
+  gap:18px;flex-wrap:wrap;margin-bottom:clamp(14px,1.8vw,20px);
+}
+.note{
+  position:relative;display:inline-block;padding:12px 24px 11px;rotate:-1.4deg;
+  background:linear-gradient(180deg,#F0E6CF,var(--kraft));
+  box-shadow:0 10px 26px -14px #000;
+}
+.note::before,.note::after{
+  content:"";position:absolute;width:52px;height:17px;
+  background:rgba(236,230,212,.42);border:1px solid rgba(255,255,255,.3);
+}
+.note::before{top:-9px;left:-14px;rotate:-21deg}
+.note::after{bottom:-9px;right:-14px;rotate:-21deg}
+.note h2{
+  margin:0;font-family:var(--f-marker);font-weight:400;
+  font-size:clamp(20px,2.5vw,31px);line-height:1;color:#C21325;
+}
+.lineup-sub{
+  margin:9px 0 0;font-family:var(--f-label);font-size:clamp(8px,.76vw,9.5px);
+  font-weight:500;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);
+}
+.showall{
+  font-family:var(--f-label);font-size:9.5px;font-weight:700;letter-spacing:.17em;
+  text-transform:uppercase;padding:10px 18px;border-radius:999px;
+  border:1px solid rgba(201,206,214,.3);color:var(--ink);
+}
+.showall{transition:border-color .4s,color .4s,background-color .4s}
+.showall:hover{border-color:var(--evidence);color:var(--evidence);background:rgba(255,194,26,.07)}
+.showall[hidden]{display:none}
+
+.table-scroll{overflow-x:auto;position:relative;z-index:1}
+.lineup{width:100%;min-width:560px;border-spacing:0 9px}
+.lineup thead th{
+  font-family:var(--f-label);font-size:9px;font-weight:700;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--muted);text-align:left;
+  padding:11px 16px;background:rgba(255,255,255,.045);white-space:nowrap;
+}
+.lineup thead th:first-child{border-radius:11px 0 0 11px}
+.lineup thead th:last-child{border-radius:0 11px 11px 0;text-align:right}
+.lineup tbody td{
+  padding:12px 16px;background:rgba(255,255,255,.028);
+  border-block:1px solid rgba(201,206,214,.07);
+  vertical-align:middle;
+}
+.lineup tbody td:first-child{border-radius:11px 0 0 11px;border-left:1px solid rgba(201,206,214,.07)}
+.lineup tbody td:last-child{border-radius:0 11px 11px 0;border-right:1px solid rgba(201,206,214,.07);text-align:right}
+.lineup tbody tr{transition:transform .62s var(--e-quint)}
+.lineup tbody td{transition:background-color .4s}
+.lineup tbody tr:hover td{background:rgba(255,255,255,.055)}
+.caseno{font-family:var(--f-mono);font-size:14px;color:var(--muted);letter-spacing:.04em}
+.suspect{display:flex;align-items:center;gap:12px;min-width:0}
+.av{
+  flex:none;width:36px;height:36px;border-radius:9px;display:grid;place-items:center;
+  font-weight:900;font-size:13px;font-style:italic;color:#CBD3E0;
+  background:
+    repeating-linear-gradient(180deg,rgba(232,220,194,.12) 0 1px,transparent 1px 7px),
+    linear-gradient(180deg,#16233B,#0C1424);
+  border:1px solid rgba(201,206,214,.16);
+}
+.suspect-name{min-width:0}
+.suspect-name b{
+  display:block;font-weight:800;font-size:16px;letter-spacing:-.005em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:34ch;
+}
+.suspect-name i{
+  display:block;font-style:normal;
+  font-family:var(--f-label);font-size:8px;font-weight:500;letter-spacing:.14em;
+  text-transform:uppercase;color:var(--muted);
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:34ch;
+}
+.status-chip{
+  display:inline-block;font-family:var(--f-label);font-size:8px;font-weight:700;
+  letter-spacing:.15em;text-transform:uppercase;padding:5px 10px;border-radius:999px;white-space:nowrap;
+}
+.status-chip.poi{color:var(--evidence);background:rgba(255,194,26,.11);border:1px solid rgba(255,194,26,.35)}
+.status-chip.surv{color:#9DBAFF;background:rgba(47,107,255,.11);border:1px solid rgba(47,107,255,.35)}
+.status-chip.none{color:var(--muted);background:rgba(255,255,255,.05);border:1px solid rgba(201,206,214,.2)}
+.row-score{
+  font-family:var(--f-mono);font-size:19px;color:var(--ink);
+  font-variant-numeric:tabular-nums;letter-spacing:.02em;
+}
+tr.is-flash .row-score{animation:cellFlash 1s var(--e-out)}
+@keyframes cellFlash{0%{color:var(--evidence);text-shadow:0 0 16px rgba(255,194,26,.9)}100%{}}
+.nomatch td{
+  text-align:center;padding:26px;color:var(--muted);
+  font-family:var(--f-label);font-size:10px;font-weight:700;letter-spacing:.2em;text-transform:uppercase;
+}
+
+/* skeleton */
+.sk{position:relative;overflow:hidden;background:rgba(255,255,255,.04);border-radius:10px}
+.sk::after{
+  content:"";position:absolute;inset:0;
+  background:linear-gradient(90deg,transparent,rgba(47,107,255,.26),rgba(255,42,61,.2),transparent);
+  animation:scan 1.5s linear infinite;
+}
+@keyframes scan{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+.sk-mug{aspect-ratio:1;border-radius:var(--r-card)}
+.sk-line{height:13px;margin-top:11px}
+.sk-plinth{height:clamp(120px,13vw,166px);margin-top:14px;border-radius:var(--r-card)}
+.loading-label{
+  margin:22px 0 0;text-align:center;
+  font-family:var(--f-label);font-size:10px;font-weight:700;letter-spacing:.3em;
+  text-transform:uppercase;color:var(--muted);
+}
+
+/* ---------- 7. Footer ---------- */
+.foot{position:relative;margin-top:clamp(28px,3.4vw,46px);padding-top:clamp(34px,4.4vw,70px);overflow:hidden}
+.skyline{position:absolute;inset:auto 0 0;width:100%;height:clamp(78px,10vw,138px);display:block;z-index:1}
+/* Glow box is taller than the skyline so the light spills above the rooflines
+   and the blocks actually read as a silhouette. */
+.foot-glow{position:absolute;inset:auto 0 0;height:clamp(180px,24vw,320px);pointer-events:none}
+.foot-glow::before,.foot-glow::after{content:"";position:absolute;bottom:0;width:62%;height:100%}
+.foot-glow::before{left:0;background:radial-gradient(54% 60% at 26% 88%,rgba(255,42,61,.5),rgba(255,42,61,.12) 48%,transparent 74%);animation:sirenA 11s ease-in-out infinite}
+.foot-glow::after{right:0;background:radial-gradient(54% 60% at 74% 88%,rgba(47,107,255,.5),rgba(47,107,255,.12) 48%,transparent 74%);animation:sirenB 11s ease-in-out infinite}
+/* Sits in the sky, clear of the rooflines, not on top of the windows. */
+.foot-line{
+  position:relative;z-index:2;text-align:center;
+  padding-bottom:clamp(92px,11.6vw,158px);
+  font-family:var(--f-mono);font-size:11px;letter-spacing:.3em;text-transform:uppercase;color:#98A2B2;
+}
+
+/* ============================================================
+   The full case file — every suspect, every point
+   ============================================================ */
+.fullcase{margin-top:clamp(22px,2.8vw,36px)}
+.fc-head{
+  display:flex;align-items:flex-end;justify-content:space-between;
+  gap:18px;flex-wrap:wrap;margin-bottom:clamp(14px,1.8vw,20px);
+}
+.fc-kicker{
+  margin:0 0 7px;font-family:var(--f-label);font-size:clamp(8px,.76vw,9.5px);
+  font-weight:700;letter-spacing:.3em;text-transform:uppercase;color:var(--red);
+}
+.fc-title{
+  margin:0;font-weight:900;font-style:italic;text-transform:uppercase;
+  font-size:clamp(20px,2.5vw,33px);line-height:1;letter-spacing:-.01em;
+}
+.fc-sub{
+  margin:9px 0 0;font-family:var(--f-label);font-size:clamp(8px,.76vw,9.5px);
+  font-weight:500;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);
+}
+.fc-tally{
+  font-family:var(--f-mono);font-size:13px;color:var(--muted);letter-spacing:.08em;
+  padding:9px 15px;border-radius:999px;border:1px solid rgba(201,206,214,.2);white-space:nowrap;
+}
+/* Podium three, marked by tint + role chip. No left-edge stripe. */
+.lineup tbody tr.is-top td{background:rgba(255,194,26,.06)}
+.lineup tbody tr.is-top:hover td{background:rgba(255,194,26,.1)}
+.lineup tbody tr.is-top .caseno{color:var(--evidence)}
+.lineup tbody tr.is-top .suspect-name b{color:#FFF4D6}
+.status-chip.role{color:var(--evidence);background:rgba(255,194,26,.16);border:1px solid rgba(255,194,26,.5)}
+
+/* Kill default <p> margins on elements that set none of their own. These are
+   em-based, so .score at 64px was inheriting 64px of dead space above and
+   below the number. */
+.tagline,.statpill,.score,.leadpill,.foot-line{margin:0}
+
+/* ============================================================
+   Responsive
+   ============================================================ */
+@media (max-width:900px){
+  .headerbar{grid-template-columns:1fr auto;row-gap:14px}
+  .hb-left{grid-column:1/-1}
+}
+@media (max-width:639px){
+  .shell{padding-top:16px}
+  .wordmark{font-size:clamp(30px,10vw,42px)}
+  .reticle{left:-10px;width:62px;height:62px}
+  .cctv{width:100%;justify-content:space-between}
+  .taglines{grid-template-columns:1fr}
+  .tagline:nth-child(1),.tagline:nth-child(3){display:none}
+  .headerbar{grid-template-columns:1fr;text-align:left}
+  .statpill{justify-self:start}
+  .search{width:100%}
+  #q{width:100%}
+
+  .podium{grid-template-columns:1fr 1fr;gap:12px;align-items:start}
+  .card--1{grid-column:1/-1;grid-row:1;padding-bottom:clamp(44px,13vw,60px)}
+  .card--2{grid-column:1;grid-row:2}
+  .card--3{grid-column:2;grid-row:2}
+  .card--1 .mug{width:min(100%,232px);aspect-ratio:1.2}
+  .string{display:none}
+  .podium-wrap::before,.podium-wrap::after,.podium-wrap>.hud-b{display:none}
+  .leadpill{white-space:normal;line-height:1.45;border-radius:14px}
+
+  .lineup{min-width:0}
+  .lineup .col-status{display:none}
+  .suspect-name b,.suspect-name i{max-width:15ch}
+  .lineup thead th,.lineup tbody td{padding:10px 11px}
+  .av{width:31px;height:31px;font-size:11px}
+  .row-score{font-size:16px}
+  .stamp{font-size:30px;right:-14px}
+}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{
+    animation-duration:.001ms!important;animation-iteration-count:1!important;
+    transition-duration:.001ms!important;
+  }
+  .rec i{opacity:1}
+}
+</style>
+</head>
+<body>
+
+<div class="bg" aria-hidden="true">
+  <div class="bg-halftone"></div>
+  <div class="bg-halftone2"></div>
+  <div class="bg-red"></div>
+  <div class="bg-blue"></div>
+  <div class="bg-scan"></div>
+  <div class="bg-vignette"></div>
+  <div class="bg-print"></div>
+</div>
+
+<div class="shell">
+
+  <!-- 1. Top bar -->
+  <header class="topbar">
+    <div class="brand">
+      <svg class="reticle" viewBox="0 0 100 100" fill="none" stroke="#FF2A3D" stroke-width="1.6" aria-hidden="true">
+        <circle cx="50" cy="50" r="30"/><circle cx="50" cy="50" r="19" stroke-dasharray="4 5"/>
+        <path d="M50 8v20M50 72v20M8 50h20M72 50h20"/><circle cx="50" cy="50" r="2.6" fill="#FF2A3D" stroke="none"/>
+      </svg>
+      <h1 class="wordmark chrome">Crimewa<span class="th">TH</span>ch</h1>
+      <p class="brand-sub">LYLC BFF Challenge · <span id="dates">26–30 OCT</span></p>
+    </div>
+
+    <div class="cctv" id="cctv">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M3 7l13-3 1.6 6.4L4.6 13.4z"/><path d="M4.6 13.4L6 19"/><path d="M3 19h6"/><path d="M17.6 10.4l3.4-1.2v5l-3.4-1.2"/>
+      </svg>
+      <span class="rec"><i></i>REC</span>
+      <span class="sync" id="sync">LAST SYNC --:--:--</span>
+      <span class="chip chip--demo" id="chipDemo" hidden>DEMO DATA</span>
+      <span class="chip chip--local" id="chipLocal" hidden>LOCAL FILE</span>
+    </div>
+  </header>
+  <p class="sr-only" role="status" id="live"></p>
+
+  <!-- 2. Tagline strip -->
+  <div class="taglines reveal">
+    <p class="tagline">Catch the Culprits</p>
+    <p class="tagline">Same Squad. Different Crimes.</p>
+    <p class="tagline">Follow the Money</p>
+  </div>
+
+  <!-- 3. Header bar -->
+  <section class="headerbar reveal">
+    <div class="hb-left">
+      <span class="badge" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.9 6.1 6.6.9-4.8 4.6 1.2 6.6L12 17.1 6.1 20.2l1.2-6.6L2.5 9l6.6-.9z"/></svg>
+      </span>
+      <div>
+        <h2 class="hb-title chrome">Leaderboard — Rise to the Top</h2>
+        <p class="hb-sub">Climb the ranks before the case closes.</p>
+      </div>
+    </div>
+    <p class="statpill"><b id="count">0</b> Suspects on File</p>
+    <div class="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+        <circle cx="11" cy="11" r="7"/><path d="M20 20l-3.5-3.5"/>
+      </svg>
+      <label class="sr-only" for="q">Search a suspect</label>
+      <input id="q" type="search" placeholder="Search a suspect…" autocomplete="off" spellcheck="false">
+      <span class="kbd" aria-hidden="true">/</span>
+    </div>
+  </section>
+
+  <!-- Admin drop zone -->
+  <div class="dropzone" id="dz" hidden>
+    <p>Drop the latest Excel file to open the case</p>
+    <div class="dz-actions">
+      <label class="dz-btn" for="file" tabindex="0">Browse for a file</label>
+      <input id="file" type="file" accept=".xlsx,.xls,.csv" class="sr-only">
+      <button class="dz-btn" id="resume" hidden>Resume live feed</button>
+    </div>
+  </div>
+
+  <!-- 4/5. Podium -->
+  <div class="podium-wrap" id="podiumWrap">
+    <div class="hud-b" aria-hidden="true"></div>
+    <div class="podium" id="podium" aria-label="Top three suspects">
+      <svg class="string" id="string" aria-hidden="true"></svg>
+    </div>
+  </div>
+
+  <!-- Pre-event / empty state -->
+  <section class="state reveal" id="state" hidden>
+    <span class="tape" id="stateTape">Case Open</span>
+    <h2 class="chrome" id="stateTitle">No Convictions Yet</h2>
+    <p id="stateSub"></p>
+  </section>
+
+  <!-- 6. Lineup -->
+  <section class="lineup-panel reveal" id="whosnext">
+    <span class="stamp" aria-hidden="true">Confidential</span>
+    <div class="lineup-head">
+      <div>
+        <span class="note"><h2>Who&rsquo;s Next?</h2></span>
+        <p class="lineup-sub">The rest of the lineup</p>
+      </div>
+      <button class="showall" id="showall" aria-expanded="false" hidden>Show all</button>
+    </div>
+    <div class="table-scroll">
+      <table class="lineup">
+        <caption class="sr-only">Suspects ranked by score, from rank four down.</caption>
+        <thead>
+          <tr>
+            <th scope="col">Case No.</th>
+            <th scope="col">Suspect</th>
+            <th scope="col" class="col-status">Status</th>
+            <th scope="col">Score</th>
+          </tr>
+        </thead>
+        <tbody id="rows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 6b. Full standings — everybody, rank 1 down -->
+  <section class="lineup-panel fullcase reveal" id="fullcase">
+    <div class="fc-head">
+      <div>
+        <p class="fc-kicker">Complete Record</p>
+        <h2 class="fc-title chrome">The Full Case File</h2>
+        <p class="fc-sub">Every suspect, every point</p>
+      </div>
+      <span class="fc-tally" id="fcTally">0 ON FILE</span>
+    </div>
+    <div class="table-scroll">
+      <table class="lineup">
+        <caption class="sr-only">Every suspect ranked by score, from rank one down.</caption>
+        <thead>
+          <tr>
+            <th scope="col">Case No.</th>
+            <th scope="col">Suspect</th>
+            <th scope="col" class="col-status">Status</th>
+            <th scope="col">Score</th>
+          </tr>
+        </thead>
+        <tbody id="fcrows"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- 7. Footer -->
+  <footer class="foot reveal">
+    <div class="foot-glow" aria-hidden="true"></div>
+    <svg class="skyline" viewBox="0 0 1200 180" preserveAspectRatio="none" aria-hidden="true">
+      <defs>
+        <pattern id="win" width="17" height="21" patternUnits="userSpaceOnUse">
+          <rect x="4" y="5" width="7" height="9" fill="#FFC21A" opacity=".26"/>
+        </pattern>
+      </defs>
+      <g fill="#02040A">
+        <rect x="0" y="74" width="132" height="106"/><rect x="140" y="44" width="104" height="136"/>
+        <rect x="252" y="92" width="88" height="88"/><rect x="348" y="26" width="120" height="154"/>
+        <rect x="476" y="66" width="96" height="114"/><rect x="580" y="12" width="136" height="168"/>
+        <rect x="724" y="58" width="92" height="122"/><rect x="824" y="86" width="112" height="94"/>
+        <rect x="944" y="38" width="108" height="142"/><rect x="1060" y="78" width="140" height="102"/>
+      </g>
+      <g fill="url(#win)">
+        <rect x="0" y="74" width="132" height="106"/><rect x="140" y="44" width="104" height="136"/>
+        <rect x="252" y="92" width="88" height="88"/><rect x="348" y="26" width="120" height="154"/>
+        <rect x="476" y="66" width="96" height="114"/><rect x="580" y="12" width="136" height="168"/>
+        <rect x="724" y="58" width="92" height="122"/><rect x="824" y="86" width="112" height="94"/>
+        <rect x="944" y="38" width="108" height="142"/><rect x="1060" y="78" width="140" height="102"/>
+      </g>
+    </svg>
+    <p class="foot-line">Case File · LYLC BFF Challenge</p>
+  </footer>
+</div>
+
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="vendor/lenis.min.js"></script>
+<script>
+"use strict";
+/* ============================================================
+   SETTINGS
+   ============================================================ */
+
+/* Where the scores come from.
+ *
+ * Deliberately NOT hardcoded, so the sheet id stays out of this public repo.
+ * Resolved at runtime, first match wins:
+ *
+ *   1. ?sheet=<id|url>   — also remembered in this browser's localStorage
+ *   2. localStorage      — set by a previous ?sheet= visit
+ *   3. the <meta name="crimewathch:sheet"> tag — written at deploy time by
+ *      .github/workflows/deploy.yml from the SHEET_URL repository secret
+ *   4. nothing           — falls back to the built-in demo suspects
+ *
+ * Be clear-eyed about what this does and does not achieve: it keeps the id out
+ * of the repository. It cannot hide it from someone viewing the deployed page,
+ * because the browser has to fetch the sheet and that request is visible in
+ * devtools. Treat anything this board can read as public.
+ */
+const SHEET_STORE_KEY = "crimewathch:sheet";
+
+const googleExport = (id) =>
+  `https://docs.google.com/spreadsheets/d/${id}/export?format=xlsx`;
+
+/* Only a Google Sheets id/link or a same-origin file is accepted. Without this
+   a crafted ?sheet= link could point the board at a stranger's server. */
+function sheetUrlFrom(value) {
+  const s = String(value ?? "").trim();
+  if (!s) return "";
+  if (/^[A-Za-z0-9_-]{20,}$/.test(s)) return googleExport(s);          // bare sheet id
+  if (/^\.{0,2}\//.test(s) && !s.startsWith("//")) return s;           // ./leaderboard.xlsx
+  let u;
+  try { u = new URL(s, location.href); } catch { return ""; }
+  if (u.origin === location.origin) return u.href;                     // file beside the page
+  if (u.protocol !== "https:" || u.hostname !== "docs.google.com") return "";
+  if (u.pathname.startsWith("/spreadsheets/d/e/")) return u.href;      // published-to-web link
+  const m = u.pathname.match(/\/spreadsheets\/d\/([A-Za-z0-9_-]+)/);
+  return m ? googleExport(m[1]) : "";
+}
+
+function resolveDataUrl() {
+  const fromParam = new URLSearchParams(location.search).get("sheet");
+  if (fromParam) {
+    const url = sheetUrlFrom(fromParam);
+    if (url) {
+      try { localStorage.setItem(SHEET_STORE_KEY, fromParam); } catch { /* private mode */ }
+      return url;
+    }
+    console.warn("CrimewaTHch: ignoring ?sheet= — not a Google Sheets id/link or a local file.");
+  }
+  try {
+    const saved = localStorage.getItem(SHEET_STORE_KEY);
+    if (saved) { const url = sheetUrlFrom(saved); if (url) return url; }
+  } catch { /* storage blocked */ }
+
+  const meta = document.querySelector('meta[name="crimewathch:sheet"]');
+  return meta ? sheetUrlFrom(meta.content) : "";
+}
+
+const DATA_URL = resolveDataUrl();
+
+const REFRESH_SECONDS = 60;
+const EVENT_DATES = "26–30 OCT";
+
+// Weighted inertial scrolling (Lenis). Desktop only, and never under
+// prefers-reduced-motion. Set false for plain native scrolling.
+const SMOOTH_SCROLL = true;
+
+// "auto" picks the transposed Scores mastersheet when it is present and falls
+// back to a flat Name|Score table. Force either with "scores" / "table".
+const PARSE_MODE = "auto";
+
+// Point value per challenge, applied in order down the challenge block.
+// Recovered from the sheet's own formula (Scores!B3):
+//   COUNTIF(B5:B10,TRUE)*200 + COUNTIF(B11:B16,TRUE)*400
+// + COUNTIF(B17:B22,TRUE)*600 + COUNTIF(B23:B26,TRUE)*800 + B27
+const SCORING_TIERS = [
+  { count: 6, points: 200 },
+  { count: 6, points: 400 },
+  { count: 6, points: 600 },
+  { count: 4, points: 800 },
+];
+
+const TABLE_PAGE = 10;   // lineup rows shown before "Show all"
+const ROLES = ["The Mastermind", "The Accomplice", "The Getaway Driver"];
+
+/* ============================================================
+   Helpers
+   ============================================================ */
+const $ = (id) => document.getElementById(id);
+const reduced = matchMedia("(prefers-reduced-motion: reduce)");
+
+const norm = (v) => String(v ?? "").replace(/\s+/g, " ").trim();
+const low  = (v) => norm(v).toLowerCase();
+const isTick = (v) => v === true || low(v) === "true";
+const fmt = (n) => n.toLocaleString("en-US");
+
+function toNum(v) {
+  if (typeof v === "number") return Number.isFinite(v) ? v : 0;
+  const n = Number(norm(v).replace(/[^0-9.\-]/g, ""));
+  return Number.isFinite(n) ? n : 0;
+}
+// A pair gets one initial each; a lone name falls back to first + last.
+function initials(name, partner) {
+  const a = norm(name), b = norm(partner);
+  if (a && b) return (a[0] + b[0]).toUpperCase();
+  const parts = (a || b).split(" ").filter(Boolean);
+  if (!parts.length) return "?";
+  return (parts.length > 1 ? parts[0][0] + parts[parts.length - 1][0] : parts[0][0]).toUpperCase();
+}
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function safePhoto(v) {
+  const s = norm(v);
+  if (!s) return "";
+  try { const u = new URL(s); return /^https?:$/.test(u.protocol) ? u.href : ""; }
+  catch { return ""; }
+}
+
+/* ============================================================
+   Parsing
+   ============================================================ */
+const TIER_WEIGHTS = SCORING_TIERS.flatMap((t) => Array(t.count).fill(t.points));
+const LAST_TIER = SCORING_TIERS[SCORING_TIERS.length - 1].points;
+
+function gridOf(ws) {
+  return XLSX.utils.sheet_to_json(ws, { header: 1, blankrows: true, defval: "", raw: true });
+}
+function looksLikeScores(grid) {
+  const colA = grid.slice(0, 40).map((r) => low(r && r[0]));
+  return colA.includes("partner") && colA.includes("challenges");
+}
+
+// Transposed mastersheet: pairs across as columns, challenges down as rows.
+// Rows are located by their column-A label, never by a fixed index, so the
+// block can move without breaking the parse.
+function parseScores(grid) {
+  const colA = grid.map((r) => low(r && r[0]));
+  const rPartner = colA.indexOf("partner");
+  const rChal = colA.indexOf("challenges");
+  const rBonus = colA.findIndex((c) => c.startsWith("bonus point"));
+  if (rPartner < 1 || rChal < 0) throw new Error("Scores layout not recognised");
+
+  const rLylc = rPartner - 1;
+  const chalStart = rChal + 1;
+  const chalEnd = rBonus > chalStart ? rBonus - 1 : grid.length - 1;
+  const blockLen = chalEnd - chalStart + 1;
+  if (blockLen !== TIER_WEIGHTS.length) {
+    console.warn(`CrimewaTHch: challenge block is ${blockLen} rows but SCORING_TIERS describes ${TIER_WEIGHTS.length}; extras scored at ${LAST_TIER}.`);
+  }
+
+  const width = grid.reduce((m, r) => Math.max(m, r ? r.length : 0), 0);
+  const out = [];
+  for (let c = 1; c < width; c++) {
+    const lylc = norm(grid[rLylc] && grid[rLylc][c]);
+    const partner = norm(grid[rPartner] && grid[rPartner][c]);
+    if (!lylc && !partner) continue;
+
+    let score = 0;
+    for (let r = chalStart; r <= chalEnd; r++) {
+      if (isTick(grid[r] && grid[r][c])) score += TIER_WEIGHTS[r - chalStart] ?? LAST_TIER;
+    }
+    if (rBonus >= 0) score += toNum(grid[rBonus] && grid[rBonus][c]);
+
+    out.push({ name: lylc || partner, partner: lylc ? partner : "", score, photo: "" });
+  }
+  return out;
+}
+
+// Flat table: Name | Score (+ optional Photo), headers matched loosely.
+function parseTable(grid) {
+  const rows = grid.filter((r) => r && r.some((c) => norm(c) !== ""));
+  if (!rows.length) return [];
+  const head = rows[0].map(low);
+  const find = (names) => head.findIndex((h) => names.includes(h));
+
+  const iName = find(["name", "participant", "team", "lylc", "suspect", "pair"]);
+  const iScore = find(["score", "points", "total", "total score"]);
+  const iPartner = find(["partner", "buddy", "bff"]);
+  const iPhoto = find(["photo", "image", "img", "mugshot", "avatar"]);
+  if (iName < 0) throw new Error("No Name / Participant / Team column found");
+
+  const out = [];
+  for (const r of rows.slice(1)) {
+    const name = norm(r[iName]);
+    const partner = iPartner >= 0 ? norm(r[iPartner]) : "";
+    if (!name && !partner) continue;
+    out.push({
+      name: name || partner,
+      partner: name ? partner : "",
+      score: iScore >= 0 ? toNum(r[iScore]) : 0,
+      photo: iPhoto >= 0 ? safePhoto(r[iPhoto]) : "",
+    });
+  }
+  return out;
+}
+
+function parseWorkbook(wb) {
+  const pick = (want) => wb.SheetNames.find((n) => low(n) === want);
+  const mode = PARSE_MODE;
+
+  if (mode !== "table") {
+    const name = pick("scores");
+    if (name) {
+      const g = gridOf(wb.Sheets[name]);
+      if (mode === "scores" || looksLikeScores(g)) return parseScores(g);
+    }
+    for (const n of wb.SheetNames) {
+      const g = gridOf(wb.Sheets[n]);
+      if (looksLikeScores(g)) return parseScores(g);
+    }
+    if (mode === "scores") throw new Error("No Scores-shaped tab found");
+  }
+  const name = pick("leaderboard") || wb.SheetNames[0];
+  return parseTable(gridOf(wb.Sheets[name]));
+}
+
+/* Highest first; ties share a rank (1,2,2,4) and are listed A to Z. */
+function rankRows(rows) {
+  const s = rows.slice().sort((a, b) =>
+    b.score - a.score || a.name.localeCompare(b.name, "en", { sensitivity: "base" })
+  );
+  let prevScore = null, prevRank = 0;
+  s.forEach((r, i) => {
+    r.rank = prevScore !== null && r.score === prevScore ? prevRank : i + 1;
+    prevScore = r.score; prevRank = r.rank;
+    r.id = low(r.name) + "||" + low(r.partner);
+  });
+  return s;
+}
+
+/* ============================================================
+   State
+   ============================================================ */
+const SAMPLE = [
+  ["Ravi", "Shanti", 7200], ["Mei Ling", "Hafiz", 6800], ["Dinesh", "Priya", 6800],
+  ["Farah", "Jordan", 5400], ["Wen Jie", "Amira", 4600], ["Kumar", "Lydia", 4200],
+  ["Siti", "Marcus", 3600], ["Jun Hao", "Elena", 3000], ["Nadia", "Terence", 2400],
+  ["Bryan", "Hui Xin", 1800], ["Aisha", "Deven", 1200], ["Caleb", "Yan Ting", 600],
+].map(([name, partner, score]) => ({ name, partner, score, photo: "" }));
+
+let rows = [];
+let prev = new Map();          // id -> { score, rank }
+let firstPaint = true;
+let expanded = false;
+let query = "";
+let timer = null;
+let paused = false;
+let haveData = false;
+
+/* ============================================================
+   Fetch
+   ============================================================ */
+function bust(url) {
+  return url + (url.includes("?") ? "&" : "?") + "_cb=" + Date.now();
+}
+
+async function load() {
+  if (paused) return;
+  if (!DATA_URL) {
+    rows = rankRows(SAMPLE.map((r) => ({ ...r })));
+    haveData = true;
+    $("chipDemo").hidden = false;
+    setSync(true);
+    render();
+    return;
+  }
+  try {
+    const res = await fetch(bust(DATA_URL), { cache: "no-store", credentials: "omit" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const buf = await res.arrayBuffer();
+
+    let wb;
+    try { wb = XLSX.read(new Uint8Array(buf), { type: "array" }); }
+    catch { wb = XLSX.read(new TextDecoder().decode(buf), { type: "string" }); }
+
+    rows = rankRows(parseWorkbook(wb));
+    haveData = true;
+    setSync(true);
+    render();
+  } catch (err) {
+    console.error("CrimewaTHch: refresh failed —", err);
+    setSync(false);
+    if (!haveData) { rows = []; render(); }   // nothing good to keep; show empty
+  }
+}
+
+function setSync(ok) {
+  const chip = $("cctv");
+  const el = $("sync");
+  if (ok) {
+    chip.classList.remove("is-lost");
+    el.textContent = "LAST SYNC " + new Date().toLocaleTimeString("en-GB", { hour12: false });
+  } else {
+    chip.classList.add("is-lost");
+    el.textContent = "SIGNAL LOST — RETRYING";
+    $("live").textContent = "Signal lost. Retrying; showing the last known scores.";
+  }
+}
+
+/* ============================================================
+   Render
+   ============================================================ */
+function matches(r) {
+  if (!query) return false;
+  return low(r.name).includes(query) || low(r.partner).includes(query);
+}
+
+const TBODIES = ["rows", "fcrows"];
+
+/* FLIP, across both tables. Keys are namespaced by tbody because the same pair
+   appears in the lineup and in the full case file. */
+function measureRows() {
+  const m = new Map();
+  for (const id of TBODIES) {
+    for (const tr of $(id).children) {
+      if (tr.dataset.id) m.set(id + "|" + tr.dataset.id, tr.getBoundingClientRect().top);
+    }
+  }
+  return m;
+}
+function flipRows(before) {
+  for (const id of TBODIES) {
+    for (const tr of $(id).children) {
+      const y0 = before.get(id + "|" + tr.dataset.id);
+      if (y0 === undefined) continue;
+      const dy = y0 - tr.getBoundingClientRect().top;
+      if (!dy) continue;
+      tr.style.transition = "none";
+      tr.style.transform = `translateY(${dy}px)`;
+      requestAnimationFrame(() => {
+        tr.style.transition = "";
+        tr.style.transform = "";
+      });
+    }
+  }
+}
+
+function render() {
+  // The very first render that actually has data: the only one that reveals
+  // and counts up. Refreshes render visible so they don't re-animate every 60s.
+  const isFirst = firstPaint && haveData;
+  const preEvent = rows.length > 0 && rows.every((r) => r.score === 0);
+  const podiumRows = preEvent ? [] : rows.slice(0, 3);
+  const tableRows = preEvent ? [] : rows.slice(3);
+
+  const countEl = $("count");
+  countEl.dataset.score = rows.length;
+  countEl.textContent = fmt(rows.length);
+
+  const before = !firstPaint && !reduced.matches ? measureRows() : null;
+
+  renderState(preEvent);
+  renderPodium(podiumRows, preEvent, isFirst);
+  renderTable(tableRows, preEvent, isFirst);
+  renderFullCase(preEvent, isFirst);
+
+  if (before) flipRows(before);
+
+  // remember for the next diff
+  const next = new Map();
+  rows.forEach((r) => next.set(r.id, { score: r.score, rank: r.rank }));
+  prev = next;
+  // The skeleton pass must not consume the first paint, or the first real
+  // render is treated as a refresh and siren-flashes every card.
+  if (haveData) firstPaint = false;
+  armReveals(isFirst);
+  requestAnimationFrame(drawString);
+}
+
+function renderState(preEvent) {
+  const box = $("state");
+  if (!haveData && !rows.length) {
+    box.hidden = false;
+    $("stateTape").textContent = "Pulling Case Files…";
+    $("stateTitle").textContent = "Opening the Case";
+    $("stateSub").textContent = "";
+    return;
+  }
+  if (!rows.length) {
+    box.hidden = false;
+    $("stateTape").textContent = "Case File";
+    $("stateTitle").textContent = "No Suspects on File Yet";
+    $("stateSub").textContent = "Add names and scores to the sheet";
+    return;
+  }
+  if (preEvent) {
+    box.hidden = false;
+    $("stateTape").textContent = "Case Open";
+    $("stateTitle").textContent = "No Convictions Yet";
+    $("stateSub").textContent = `${fmt(rows.length)} suspects on file · all tied on 0 points`;
+    return;
+  }
+  box.hidden = true;
+}
+
+function renderPodium(top, preEvent, isFirst) {
+  const host = $("podium");
+  const wrap = $("podiumWrap");
+  wrap.hidden = preEvent || !rows.length;
+  if (wrap.hidden) {
+    host.querySelectorAll(".card,.leadpill").forEach((n) => n.remove());
+    return;
+  }
+
+  // loading skeletons
+  if (!haveData) {
+    host.querySelectorAll(".card,.leadpill").forEach((n) => n.remove());
+    [2, 1, 3].forEach((slot) => {
+      const d = document.createElement("div");
+      d.className = `card card--${slot}`;
+      d.innerHTML = `<div class="sk sk-mug"></div><div class="sk sk-line"></div><div class="sk sk-plinth"></div>`;
+      host.appendChild(d);
+    });
+    if (!host.querySelector(".loading-label")) {
+      const p = document.createElement("p");
+      p.className = "loading-label";
+      p.textContent = "Pulling case files…";
+      wrap.appendChild(p);
+    }
+    return;
+  }
+  wrap.querySelector(".loading-label")?.remove();
+
+  host.querySelectorAll(".card,.leadpill").forEach((n) => n.remove());
+  const order = [2, 1, 3];           // visual left-to-right
+  const anyMatch = query && rows.some(matches);
+  host.classList.toggle("has-match", !!(anyMatch && query));
+
+  order.forEach((slot, i) => {
+    const r = top[slot - 1];
+    const card = document.createElement("div");
+    card.className = `card card--${slot}`;
+    if (!r) {
+      card.classList.add("card--empty");
+      card.innerHTML = `
+        <div class="mug">
+          <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 3a4.2 4.2 0 110 8.4A4.2 4.2 0 0112 3zm0 10.2c4.3 0 7.8 2.3 7.8 5.1V21H4.2v-2.7c0-2.8 3.5-5.1 7.8-5.1z"/></svg>
+          <span class="sticker"><span>At Large</span></span>
+        </div>
+        <p class="card-name" aria-hidden="true">&nbsp;</p>
+        <div class="plinth">
+          <div class="tent"><span>${slot}</span></div>
+          <p class="role">${esc(ROLES[slot - 1])}</p>
+          <div class="divider"></div>
+          <p class="score">—</p>
+          <p class="score-label">Points</p>
+        </div>`;
+      host.appendChild(card);
+      return;
+    }
+
+    const was = prev.get(r.id);
+    const mug = r.photo
+      ? `<img src="${esc(r.photo)}" alt="" onerror="this.closest('.mug').classList.add('mug--chart');this.replaceWith(Object.assign(document.createElement('span'),{className:'initials',textContent:'${esc(initials(r.name, r.partner))}'}))">`
+      : `<span class="initials">${esc(initials(r.name, r.partner))}</span>`;
+
+    card.innerHTML = `
+      ${slot === 1 ? '<div class="sirenbar" aria-hidden="true"></div>' : ""}
+      <div class="mug ${r.photo ? "" : "mug--chart"}">
+        ${mug}
+        <span class="suspect-tag">Suspect #${String(r.rank).padStart(2, "0")}</span>
+      </div>
+      <p class="card-name chrome" title="${esc(r.name)}">${esc(r.name)}</p>
+      ${r.partner ? `<p class="card-partner" title="${esc(r.partner)}">with ${esc(r.partner)}</p>` : `<p class="card-partner">&nbsp;</p>`}
+      <div class="plinth">
+        <div class="tent"><span>${r.rank}</span></div>
+        <p class="role">${esc(ROLES[slot - 1])}</p>
+        <div class="divider"></div>
+        <p class="score chrome" data-score="${r.score}">${fmt(r.score)}</p>
+        <p class="score-label">Points</p>
+      </div>`;
+
+    card.setAttribute("aria-label",
+      `Rank ${r.rank}. ${r.name}${r.partner ? " with " + r.partner : ""}. ${fmt(r.score)} points.`);
+
+    if (matches(r)) card.classList.add("is-match");
+    if (!reduced.matches && !firstPaint) {
+      if (was && was.score !== r.score) card.classList.add("is-flash");
+      if (!was || was.rank > 3) card.classList.add("is-siren");
+    }
+    if (isFirst) {
+      card.classList.add("reveal");
+      card.style.setProperty("--d", `${i * 90}ms`);
+    }
+    host.appendChild(card);
+  });
+
+  // 5. status pill over the #1 plinth
+  if (top.length) {
+    const pill = document.createElement("p");
+    pill.className = "leadpill";
+    const a = top[0], b = top[1];
+    if (!b) {
+      pill.innerHTML = `<b>${esc(a.name)}</b> stands alone on ${fmt(a.score)} points`;
+    } else if (a.score === b.score) {
+      pill.innerHTML = `Tied at the top on <b>${fmt(a.score)}</b> points`;
+    } else {
+      pill.innerHTML = `<b>${esc(a.name)}</b> leads by ${fmt(a.score - b.score)} points`;
+    }
+    host.querySelector(".card--1")?.appendChild(pill);
+  }
+}
+
+function statusFor(rank, preEvent) {
+  if (preEvent) return ["none", "No Convictions"];
+  if (rank <= 10) return ["poi", "Person of Interest"];
+  return ["surv", "Under Surveillance"];
+}
+
+/* One row, shared by both tables. `role` replaces the status chip for the
+   podium three; `reveal` is only set on the first paint. */
+function rowHtml(r, { preEvent, role = "", top = false, delay = 0, reveal = false }) {
+  const was = prev.get(r.id);
+  const changed = !firstPaint && was && was.score !== r.score && !reduced.matches;
+  const [sc, sl] = role ? ["role", role] : statusFor(r.rank, preEvent);
+  const cls = [changed && "is-flash", top && "is-top", reveal && "reveal"].filter(Boolean).join(" ");
+  return `<tr data-id="${esc(r.id)}"${cls ? ` class="${cls}"` : ""}${reveal ? ` style="--d:${delay}ms"` : ""}>
+      <td><span class="caseno">${preEvent ? "—" : "#" + String(r.rank).padStart(3, "0")}</span></td>
+      <td>
+        <div class="suspect">
+          <span class="av" aria-hidden="true">${esc(initials(r.name, r.partner))}</span>
+          <span class="suspect-name">
+            <b title="${esc(r.name)}">${esc(r.name)}</b>
+            ${r.partner ? `<i title="${esc(r.partner)}">with ${esc(r.partner)}</i>` : ""}
+          </span>
+        </div>
+      </td>
+      <td class="col-status"><span class="status-chip ${sc}">${sl}</span></td>
+      <td><span class="row-score">${fmt(r.score)}</span></td>
+    </tr>`;
+}
+
+const skeletonRows = (n) => Array.from({ length: n }, () =>
+  `<tr><td colspan="4"><div class="sk" style="height:38px"></div></td></tr>`).join("");
+
+const noRow = (msg) => `<tr class="nomatch"><td colspan="4">${msg}</td></tr>`;
+
+function renderTable(list, preEvent, isFirst) {
+  const body = $("rows");
+  const btn = $("showall");
+
+  if (!haveData) {
+    body.innerHTML = skeletonRows(6);
+    btn.hidden = true;
+    return;
+  }
+
+  // "Who's chasing" is meaningless at an all-zero tie, and an empty sheet has
+  // no lineup at all. The full case file carries both cases.
+  $("whosnext").hidden = preEvent || !rows.length;
+  if ($("whosnext").hidden) { body.innerHTML = ""; btn.hidden = true; return; }
+
+  const filtered = query ? list.filter(matches) : list;
+  const shown = expanded || query ? filtered : filtered.slice(0, TABLE_PAGE);
+
+  btn.hidden = !!query || filtered.length <= TABLE_PAGE;
+  btn.textContent = expanded ? "Show fewer" : "Show all";
+  btn.setAttribute("aria-expanded", String(expanded));
+
+  body.innerHTML = shown.length
+    ? shown.map((r, i) => rowHtml(r, {
+        preEvent, delay: Math.min(i * 40, 400), reveal: isFirst,
+      })).join("")
+    : noRow(query ? "No suspect matches that name" : "No one else in the lineup");
+}
+
+/* Everybody, rank 1 down, always expanded. */
+function renderFullCase(preEvent, isFirst) {
+  const body = $("fcrows");
+
+  if (!haveData) { body.innerHTML = skeletonRows(8); return; }
+
+  $("fullcase").hidden = !rows.length;
+  $("fcTally").textContent = `${fmt(rows.length)} ON FILE`;
+  if (!rows.length) { body.innerHTML = ""; return; }
+
+  // Keep each pair's position in the full ranking so the podium three are
+  // marked by position, not by rank value (a 4-way tie at 1 would mark four).
+  const indexed = rows.map((r, i) => ({ r, i }));
+  const filtered = query ? indexed.filter(({ r }) => matches(r)) : indexed;
+
+  body.innerHTML = filtered.length
+    ? filtered.map(({ r, i }) => {
+        const top = !preEvent && i < 3;
+        return rowHtml(r, {
+          preEvent,
+          role: top ? ROLES[i] : "",
+          top,
+          delay: Math.min(i * 40, 600),
+          reveal: isFirst,
+        });
+      }).join("")
+    : noRow("No suspect matches that name");
+}
+
+/* ============================================================
+   Motion — Lenis smooth scroll, scroll reveals, count-up
+   ============================================================ */
+let revealIO = null, countIO = null;
+
+function initMotion() {
+  if (SMOOTH_SCROLL && !reduced.matches && typeof Lenis !== "undefined"
+      && matchMedia("(min-width: 768px)").matches) {
+    new Lenis({
+      duration: 0.8,
+      smoothWheel: true,
+      allowNestedScroll: true,
+      autoRaf: true,
+      easing: (t) => 1 - Math.pow(1 - t, 3),
+    });
+  }
+
+  if (reduced.matches || !("IntersectionObserver" in window)) return;
+  document.documentElement.classList.add("has-reveal");
+
+  // ScrollTrigger's `start: 'top 90%', once: true` is exactly this: shrink the
+  // root's bottom edge by 10%, then stop observing after the first hit.
+  const opts = { rootMargin: "0px 0px -10% 0px", threshold: 0 };
+  revealIO = new IntersectionObserver((es, obs) => {
+    for (const e of es) {
+      if (!e.isIntersecting) continue;
+      e.target.classList.add("is-in");
+      obs.unobserve(e.target);
+    }
+  }, opts);
+  // Counters trigger on any overlap, not at the 90% line. They are zeroed the
+  // moment they are armed, so a late trigger would otherwise read as the final
+  // number visibly snapping back to 0 before counting.
+  countIO = new IntersectionObserver((es, obs) => {
+    for (const e of es) {
+      if (!e.isIntersecting) continue;
+      countUp(e.target);
+      obs.unobserve(e.target);
+    }
+  }, { rootMargin: "0px", threshold: 0 });
+}
+
+/* Arm anything newly rendered. Counters are armed on the first data paint
+   only, so refreshed scores show their value instead of ticking up again. */
+function armReveals(armCounters) {
+  if (!revealIO) return;
+  for (const el of document.querySelectorAll(".reveal:not(.is-in)")) {
+    if (el.dataset.armed) continue;
+    el.dataset.armed = "1";
+    revealIO.observe(el);
+  }
+  if (!armCounters) return;
+  for (const el of document.querySelectorAll("[data-score]")) {
+    if (el.dataset.armed) continue;
+    el.dataset.armed = "1";
+    el.textContent = "0";          // start at zero so nothing snaps backwards
+    countIO.observe(el);
+  }
+}
+
+/* Count one number up from zero. Novaform's exact timing: 1.2s, power1.out,
+   which is GSAP's quadratic ease-out. */
+function countUp(el) {
+  const target = Number(el.dataset.score);
+  if (!Number.isFinite(target)) return;
+  const dur = 1200;
+  let t0 = null;
+  el.textContent = "0";
+  const step = (t) => {
+    // Seed from the first frame's own timestamp. rAF reports the frame START,
+    // which can predate a performance.now() taken moments earlier — that made
+    // progress briefly negative and flashed a negative score on screen.
+    if (t0 === null) t0 = t;
+    const p = Math.max(0, Math.min(1, (t - t0) / dur));
+    el.textContent = fmt(Math.round(target * (1 - Math.pow(1 - p, 2))));
+    if (p < 1) requestAnimationFrame(step);
+    else el.textContent = fmt(target);
+  };
+  requestAnimationFrame(step);
+}
+
+/* red string and push pins between the three mugshots */
+function drawString() {
+  const svg = $("string");
+  const host = $("podium");
+  // Only pin real suspects: AT LARGE placeholders get no string.
+  const base = host.getBoundingClientRect();
+  const pt = (el) => {
+    const r = el.getBoundingClientRect();
+    return { x: r.left - base.left + r.width / 2, y: r.top - base.top + 5 };
+  };
+  const order = [2, 1, 3]                           // left-to-right
+    .map((s) => host.querySelector(`.card--${s}:not(.card--empty) .mug`))
+    .filter(Boolean)
+    .map(pt);
+  if (order.length < 2 || innerWidth < 640) { svg.innerHTML = ""; return; }
+  svg.setAttribute("viewBox", `0 0 ${base.width} ${base.height}`);
+
+  let d = "";
+  for (let i = 0; i < order.length - 1; i++) {
+    const a = order[i], b = order[i + 1];
+    const mx = (a.x + b.x) / 2, my = Math.max(a.y, b.y) + 34;   // sag
+    d += `M${a.x} ${a.y} Q${mx} ${my} ${b.x} ${b.y} `;
+  }
+  svg.innerHTML =
+    `<path d="${d}" fill="none" stroke="#FF2A3D" stroke-width="1.6" opacity=".72"/>` +
+    order.map((p) =>
+      `<circle cx="${p.x}" cy="${p.y}" r="5" fill="#FF2A3D" stroke="#fff" stroke-width="1.4"/>`
+    ).join("");
+}
+
+/* ============================================================
+   Search
+   ============================================================ */
+$("q").addEventListener("input", (e) => {
+  query = low(e.target.value);
+  render();
+});
+addEventListener("keydown", (e) => {
+  const el = document.activeElement;
+  const typing = el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+  if (e.key === "/" && !typing) { e.preventDefault(); $("q").focus(); }
+  if (e.key === "Escape" && query) {
+    $("q").value = ""; query = ""; render(); $("q").blur();
+  }
+});
+$("showall").addEventListener("click", () => { expanded = !expanded; render(); });
+
+/* ============================================================
+   ?admin — preview a local file in this browser only
+   ============================================================ */
+if (/(^|[?&])admin(&|=|$)/.test(location.search)) {
+  const dz = $("dz");
+  dz.hidden = false;
+
+  const openFile = async (file) => {
+    if (!file) return;
+    try {
+      const buf = await file.arrayBuffer();
+      let wb;
+      try { wb = XLSX.read(new Uint8Array(buf), { type: "array" }); }
+      catch { wb = XLSX.read(new TextDecoder().decode(buf), { type: "string" }); }
+      rows = rankRows(parseWorkbook(wb));
+      haveData = true;
+      paused = true;
+      firstPaint = true;
+      clearInterval(timer);
+      $("chipLocal").hidden = false;
+      $("chipDemo").hidden = true;
+      $("resume").hidden = false;
+      setSync(true);
+      $("live").textContent = `Previewing ${file.name} locally. Auto-refresh paused.`;
+      render();
+    } catch (err) {
+      console.error("CrimewaTHch: could not read that file —", err);
+      $("live").textContent = "That file could not be read.";
+    }
+  };
+
+  ["dragenter", "dragover"].forEach((t) =>
+    dz.addEventListener(t, (e) => { e.preventDefault(); dz.classList.add("is-over"); }));
+  ["dragleave", "drop"].forEach((t) =>
+    dz.addEventListener(t, (e) => { e.preventDefault(); dz.classList.remove("is-over"); }));
+  dz.addEventListener("drop", (e) => openFile(e.dataTransfer?.files?.[0]));
+  $("file").addEventListener("change", (e) => openFile(e.target.files[0]));
+  $("resume").addEventListener("click", () => {
+    paused = false;
+    firstPaint = true;
+    $("chipLocal").hidden = true;
+    $("resume").hidden = true;
+    start();
+  });
+  // keyboard activation for the file label
+  document.querySelector('label[for="file"]').addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); $("file").click(); }
+  });
+}
+
+/* ============================================================
+   Boot
+   ============================================================ */
+$("dates").textContent = EVENT_DATES;
+
+function start() {
+  clearInterval(timer);
+  load();
+  timer = setInterval(load, Math.max(5, REFRESH_SECONDS) * 1000);
+}
+
+let rsz;
+addEventListener("resize", () => { clearTimeout(rsz); rsz = setTimeout(drawString, 140); });
+document.fonts?.ready.then(drawString);
+
+initMotion();   // must precede the first render: armReveals() needs the observers
+render();       // skeletons first
+start();
+</script>
+</body>
+</html>

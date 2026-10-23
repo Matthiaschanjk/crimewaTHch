@@ -1,0 +1,10 @@
+# Local Claude Code settings — machine-specific, not part of the site
+.claude/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Node, if you ever add tooling here
+node_modules/
