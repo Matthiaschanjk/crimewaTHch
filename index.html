@@ -46,6 +46,41 @@
 
   --e-out:cubic-bezier(.16,1,.3,1);          /* ease-out-expo-ish */
   --e-quint:cubic-bezier(.22,1,.36,1);
+
+  /* ---- motion: easing ----------------------------------------
+     Exponential ease-outs only. No bounce, no elastic, and never
+     ease-in on anything the user triggered — ease-in delays the
+     first few frames, which is exactly when they are looking. */
+  --e-quart:cubic-bezier(.25,1,.5,1);        /* default for hover/colour */
+  --e-strong:cubic-bezier(.23,1,.32,1);      /* press + UI interactions */
+  --e-drawer:cubic-bezier(.32,.72,0,1);      /* panels sliding in */
+  --e-inout:cubic-bezier(.65,0,.35,1);       /* there-and-back toggles */
+
+  /* ---- motion: duration --------------------------------------
+     Interactive UI stays under 300ms. 400ms is reserved for real
+     layout change; 500-900ms only for the once-per-visit intro. */
+  --d-instant:100ms;   /* colour / opacity flicks            */
+  --d-press:160ms;     /* :active feedback                   */
+  --d-tip:125ms;       /* the / hint, tooltips               */
+  --d-sm:200ms;        /* chips, status, inputs              */
+  --d-md:250ms;        /* panels, dimming                    */
+  --d-lg:300ms;        /* ceiling for interactive motion      */
+  --d-layout:400ms;    /* genuine layout change only          */
+  --d-flip:620ms;      /* row reorder (distance-scaled in JS) */
+  --d-reveal:620ms;    /* scroll reveal                       */
+  --d-intro:900ms;     /* intro beats                         */
+  --d-exit:150ms;      /* exits run ~0.75x of their entrance  */
+
+  /* ambient loops — slow on purpose, they must never pull focus */
+  --d-siren:11s;
+  --d-blink:1.5s;
+  --d-sweep:1.9s;
+
+  /* ---- motion: constants -------------------------------------- */
+  --m-press:.97;       /* never scale(0) and never below .95        */
+  --m-lift:-2px;
+  --m-rise:28px;       /* reveal travel; zeroed under reduced motion */
+  --m-stagger:60ms;    /* per-item; capped at 10 items in JS         */
 }
 
 *,*::before,*::after{box-sizing:border-box}
@@ -89,10 +124,10 @@ html.lenis,html.lenis body{height:auto}
 /* :not(tr) matters — without it rows inherit the translate AND this 900ms
    transition, which outranks the FLIP transition and delays every reorder by
    the reveal's stagger. Rows are handled separately, below. */
-html.has-reveal .reveal:not(tr){opacity:0;transform:translateY(28px)}
+html.has-reveal .reveal:not(tr){opacity:0;transform:translateY(var(--m-rise))}
 html.has-reveal .reveal:not(tr).is-in{
   opacity:1;transform:none;
-  transition:opacity .9s var(--e-out),transform .9s var(--e-out);
+  transition:opacity var(--d-reveal) var(--e-out),transform var(--d-reveal) var(--e-out);
   transition-delay:var(--d,0ms);
 }
 /* Rows fade only, and via an ANIMATION rather than a transition. FLIP owns
@@ -100,8 +135,29 @@ html.has-reveal .reveal:not(tr).is-in{
    either clobber that (rows snap instead of sliding) or apply the reveal's
    stagger delay to every later reorder. An animation leaves transition alone. */
 html.has-reveal tr.reveal{opacity:0}
-html.has-reveal tr.reveal.is-in{animation:rowIn .62s var(--e-out) var(--d,0ms) both}
+html.has-reveal tr.reveal.is-in{animation:rowIn var(--d-flip) var(--e-out) var(--d,0ms) both}
 @keyframes rowIn{from{opacity:0}to{opacity:1}}
+
+/* ---- scroll progress: the evidence tape ----------------------
+   scaleX, never width — width is layout on every frame. Native
+   scroll timeline where it exists (Firefox only ships this on
+   2026-10-27), otherwise the shared rAF ticker writes --sp. */
+.tape-progress{
+  position:fixed;top:0;left:0;right:0;height:2px;z-index:40;
+  pointer-events:none;transform-origin:0 50%;
+  transform:scaleX(var(--sp,0));
+  background:linear-gradient(90deg,var(--red),var(--evidence) 52%,var(--blue));
+  opacity:0;transition:opacity var(--d-md) var(--e-quart);
+}
+html.is-scrolled .tape-progress{opacity:1}
+@supports (animation-timeline:scroll()){
+  html.has-reveal .tape-progress{
+    transform:scaleX(0);
+    animation:tapeGrow linear both;
+    animation-timeline:scroll(root block);
+  }
+}
+@keyframes tapeGrow{from{transform:scaleX(0)}to{transform:scaleX(1)}}
 
 /* ============================================================
    Background: navy halftone wave, trading siren glows,
@@ -188,7 +244,51 @@ html.has-reveal tr.reveal.is-in{animation:rowIn .62s var(--e-out) var(--d,0ms) b
   width:clamp(84px,10vw,136px);height:clamp(84px,10vw,136px);
   opacity:.2;pointer-events:none;z-index:-1;
 }
+/* Sticky from 640px up. The condense below is pointless on a bar that scrolls
+   away, and on a board people watch for five days, keeping LAST SYNC and the
+   REC light on screen is worth the strip of space. Phones keep the static
+   header — a sticky bar there costs more screen than it returns. */
 .topbar{isolation:isolate}
+@media (min-width:640px){
+  .topbar{
+    position:sticky;top:0;z-index:30;
+    margin-inline:calc(var(--gut) * -1);
+    padding-inline:var(--gut);
+    padding-block:10px;
+  }
+  /* The panel is a full-bleed pseudo-element rather than a background on the
+     bar itself: .shell is capped at 1480px, so a background on .topbar stops
+     short of the viewport edge on wide screens and reads as a floating slab.
+     z-index:-1 keeps it behind the bar's own content, inside the isolate. */
+  .topbar::before{
+    content:"";position:absolute;inset:0;z-index:-1;
+    left:50%;translate:-50% 0;width:100vw;   /* body has overflow-x:hidden */
+    background:rgba(var(--panel)/0);
+    border-bottom:1px solid transparent;
+    transition:background-color var(--d-md) var(--e-quart),
+               border-color var(--d-md) var(--e-quart),
+               backdrop-filter var(--d-md) var(--e-quart);
+  }
+  html.is-condensed .topbar::before{
+    background:rgba(var(--panel)/.78);
+    border-bottom-color:rgba(201,206,214,.12);
+    backdrop-filter:blur(14px) saturate(118%);
+  }
+}
+/* Condense on scroll (Superpower's nav-to-pill move). Scale + opacity only —
+   never height, which would relayout the whole page on every scroll frame. */
+.topbar .brand-sub{
+  transition:opacity var(--d-md) var(--e-quart),transform var(--d-md) var(--e-quart);
+  transform-origin:left center;
+}
+html.is-condensed .topbar .brand-sub{opacity:0;transform:translateY(-6px)}
+.topbar .wordmark{
+  transition:transform var(--d-md) var(--e-drawer);
+  transform-origin:left center;
+}
+html.is-condensed .topbar .wordmark{transform:scale(.72)}
+html.is-condensed .reticle{opacity:.08}
+.reticle{transition:opacity var(--d-lg) var(--e-quart)}
 .wordmark{
   position:relative;margin:0;
   font-family:var(--f-display);font-weight:900;font-style:italic;
@@ -219,12 +319,16 @@ html.has-reveal tr.reveal.is-in{animation:rowIn .62s var(--e-out) var(--d,0ms) b
   display:inline-flex;align-items:center;gap:6px;
   font-family:var(--f-label);font-size:9.5px;font-weight:700;letter-spacing:.2em;color:var(--red);
 }
-.rec i{width:7px;height:7px;border-radius:50%;background:var(--red);box-shadow:0 0 9px var(--red);animation:blink 1.5s steps(1,end) infinite}
+.rec i{width:7px;height:7px;border-radius:50%;background:var(--red);box-shadow:0 0 9px var(--red);animation:blink var(--d-blink) steps(1,end) infinite}
 @keyframes blink{0%,49%{opacity:1}50%,100%{opacity:.15}}
 .sync{font-family:var(--f-mono);font-size:12px;color:var(--muted);letter-spacing:.06em;white-space:nowrap}
+/* SIGNAL LOST used to snap. It is the one state change that carries bad news,
+   so it crossfades and the pulse slows to half speed rather than jumping. */
+.cctv{transition:border-color var(--d-sm) var(--e-quart),box-shadow var(--d-sm) var(--e-quart)}
+.cctv .rec,.cctv .rec i{transition:color var(--d-sm) var(--e-quart),background-color var(--d-sm) var(--e-quart),box-shadow var(--d-sm) var(--e-quart)}
 .cctv.is-lost{border-color:rgba(255,175,36,.5);box-shadow:inset 0 0 26px -14px var(--amber)}
 .cctv.is-lost .rec{color:var(--amber)}
-.cctv.is-lost .rec i{background:var(--amber);box-shadow:0 0 9px var(--amber)}
+.cctv.is-lost .rec i{background:var(--amber);box-shadow:0 0 9px var(--amber);animation-duration:calc(var(--d-blink) * 2)}
 
 .chip{
   font-family:var(--f-label);font-size:9px;font-weight:700;letter-spacing:.2em;
@@ -254,6 +358,15 @@ html.has-reveal tr.reveal.is-in{animation:rowIn .62s var(--e-out) var(--d,0ms) b
 }
 .tagline:nth-child(2)::after{margin-inline:auto}
 .tagline:nth-child(3)::after{margin-left:auto}
+/* The red rules wipe outward from their own edge as the strip arrives. */
+html.has-reveal .taglines .tagline::after{transform:scaleX(0);transform-origin:left center}
+html.has-reveal .taglines .tagline:nth-child(2)::after{transform-origin:center}
+html.has-reveal .taglines .tagline:nth-child(3)::after{transform-origin:right center}
+html.has-reveal .taglines.is-in .tagline::after{
+  transform:scaleX(1);
+  transition:transform var(--d-intro) var(--e-out);
+  transition-delay:calc(var(--d,0ms) + 120ms);
+}
 
 /* ---------- 3. Header bar ---------- */
 .headerbar{
@@ -305,15 +418,19 @@ html.has-reveal tr.reveal.is-in{animation:rowIn .62s var(--e-out) var(--d,0ms) b
   border:1px solid rgba(201,206,214,.2);border-radius:10px;
 }
 #q::placeholder{color:#6C7689}
-#q{transition:border-color .4s,background-color .4s,box-shadow .4s}
-#q:hover{border-color:rgba(201,206,214,.34)}
+#q{transition:border-color var(--d-sm) var(--e-quart),background-color var(--d-sm) var(--e-quart),box-shadow var(--d-sm) var(--e-quart)}
+@media (hover:hover) and (pointer:fine){
+  #q:hover{border-color:rgba(201,206,214,.34)}
+}
+#q:focus-visible{border-color:rgba(255,194,26,.55);background:rgba(6,10,20,.9)}
 .kbd{
   position:absolute;right:10px;
   font-family:var(--f-mono);font-size:11px;color:var(--muted);
   padding:2px 7px;border:1px solid rgba(201,206,214,.24);border-radius:5px;
   background:rgba(255,255,255,.05);pointer-events:none;
 }
-#q:not(:placeholder-shown)~.kbd{opacity:0}
+.kbd{transition:opacity var(--d-tip) var(--e-quart),transform var(--d-tip) var(--e-quart)}
+#q:not(:placeholder-shown)~.kbd{opacity:0;transform:scale(.9)}
 
 /* ---------- Admin drop zone ---------- */
 .dropzone{
@@ -333,9 +450,16 @@ html.has-reveal tr.reveal.is-in{animation:rowIn .62s var(--e-out) var(--d,0ms) b
   text-transform:uppercase;padding:9px 15px;border-radius:8px;
   border:1px solid rgba(201,206,214,.3);color:var(--ink);
 }
-.dz-btn{transition:border-color .4s,color .4s,background-color .4s}
-.dz-btn:hover{border-color:var(--evidence);color:var(--evidence)}
-.dropzone{transition:background-color .4s,border-color .4s}
+.dz-btn{
+  min-height:44px;                              /* touch target */
+  transition:border-color var(--d-sm) var(--e-quart),color var(--d-sm) var(--e-quart),
+             background-color var(--d-sm) var(--e-quart),transform var(--d-press) var(--e-strong);
+}
+@media (hover:hover) and (pointer:fine){
+  .dz-btn:hover{border-color:var(--evidence);color:var(--evidence)}
+}
+.dz-btn:active{transform:scale(var(--m-press))}
+.dropzone{transition:background-color var(--d-sm) var(--e-quart),border-color var(--d-sm) var(--e-quart)}
 
 /* ============================================================
    4. Podium
@@ -360,6 +484,9 @@ html.has-reveal tr.reveal.is-in{animation:rowIn .62s var(--e-out) var(--d,0ms) b
   align-items:end;
 }
 .string{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:3;overflow:visible}
+/* Pins scale about their own centre, not the SVG origin, so the pop reads as
+   the pin landing rather than it sliding in from the corner. */
+.string circle{transform-box:fill-box;transform-origin:center}
 
 /* Cap card width so the mugshot and the plinth read as one object rather than
    a small square floating over a very wide box. */
@@ -377,7 +504,7 @@ html.has-reveal tr.reveal.is-in{animation:rowIn .62s var(--e-out) var(--d,0ms) b
   border-radius:999px;overflow:hidden;
   background:linear-gradient(90deg,var(--red) 0 50%,var(--blue) 50% 100%);
   box-shadow:0 0 26px -2px rgba(255,42,61,.75),0 0 26px -2px rgba(47,107,255,.75);
-  animation:sirenbar 1.9s ease-in-out infinite;
+  animation:sirenbar var(--d-sweep) ease-in-out infinite;
 }
 @keyframes sirenbar{0%,100%{box-shadow:0 0 30px 1px rgba(255,42,61,.9),0 0 10px -4px rgba(47,107,255,.5)}50%{box-shadow:0 0 10px -4px rgba(255,42,61,.5),0 0 30px 1px rgba(47,107,255,.9)}}
 
@@ -394,9 +521,11 @@ html.has-reveal tr.reveal.is-in{animation:rowIn .62s var(--e-out) var(--d,0ms) b
 .mug img{width:100%;height:100%;object-fit:cover}
 /* Scale the contents inside the overflow-hidden frame, not the frame itself,
    so the red-string pin anchors stay put. */
-.mug img,.mug .initials{transition:transform .6s var(--e-out)}
-.mug:hover img,.mug:hover .initials{transform:scale(1.08)}
-.mug{transition:box-shadow .4s,border-color .4s}
+.mug img,.mug .initials{transition:transform var(--d-lg) var(--e-out)}
+@media (hover:hover) and (pointer:fine){
+  .mug:hover img,.mug:hover .initials{transform:scale(1.08)}
+}
+.mug{transition:box-shadow var(--d-sm) var(--e-quart),border-color var(--d-sm) var(--e-quart)}
 .mug--chart{
   background-image:
     repeating-linear-gradient(180deg,rgba(232,220,194,.085) 0 1px,transparent 1px 11px),
@@ -487,12 +616,30 @@ html.has-reveal tr.reveal.is-in{animation:rowIn .62s var(--e-out) var(--d,0ms) b
 }
 
 /* flashes */
-.card.is-flash .plinth{animation:flashScore .9s var(--e-out)}
+.card.is-flash .plinth{animation:flashScore var(--d-intro) var(--e-out)}
 @keyframes flashScore{0%{box-shadow:inset 0 0 0 2px var(--evidence),0 0 34px -6px rgba(255,194,26,.8)}100%{}}
 .card.is-siren .mug{animation:sirenFlash 1.1s ease-in-out 2}
 @keyframes sirenFlash{0%,100%{box-shadow:0 20px 50px -26px #000}25%{box-shadow:0 0 0 3px var(--red),0 0 40px -4px var(--red)}75%{box-shadow:0 0 0 3px var(--blue),0 0 40px -4px var(--blue)}}
 .card.is-match .mug{box-shadow:0 0 0 3px var(--evidence),0 0 40px -6px rgba(255,194,26,.75)}
+/* Search dimming used to snap on every keystroke. Opacity only, so it stays on
+   the compositor even while both tables are being rebuilt underneath. */
+.podium .card{transition:opacity var(--d-md) var(--e-quart)}
 .podium.has-match .card:not(.is-match){opacity:.3}
+
+/* The promotion ghost: a clone that flies from a table row to its new podium
+   card when a pair breaks into the top three. Positioned in the viewport and
+   driven by WAAPI, so it never participates in layout. */
+.ghost{
+  position:fixed;z-index:60;pointer-events:none;margin:0;
+  border-radius:var(--r-card);
+  background:rgba(var(--panel)/.96);
+  border:1px solid rgba(255,194,26,.6);
+  box-shadow:0 0 0 1px rgba(255,194,26,.3),0 26px 60px -22px #000,0 0 50px -10px rgba(255,194,26,.5);
+  display:flex;align-items:center;gap:10px;padding:0 14px;
+  font-family:var(--f-display);font-weight:900;font-style:italic;
+  color:var(--ink);white-space:nowrap;overflow:hidden;
+}
+.ghost b{color:var(--evidence);font-family:var(--f-mono);font-style:normal;font-weight:400}
 
 /* Entry is handled by the scroll reveal, not an on-load drop-in. */
 
@@ -602,8 +749,15 @@ html.has-reveal tr.reveal.is-in{animation:rowIn .62s var(--e-out) var(--d,0ms) b
   text-transform:uppercase;padding:10px 18px;border-radius:999px;
   border:1px solid rgba(201,206,214,.3);color:var(--ink);
 }
-.showall{transition:border-color .4s,color .4s,background-color .4s}
-.showall:hover{border-color:var(--evidence);color:var(--evidence);background:rgba(255,194,26,.07)}
+.showall{
+  min-height:44px;                              /* touch target */
+  transition:border-color var(--d-sm) var(--e-quart),color var(--d-sm) var(--e-quart),
+             background-color var(--d-sm) var(--e-quart),transform var(--d-press) var(--e-strong);
+}
+@media (hover:hover) and (pointer:fine){
+  .showall:hover{border-color:var(--evidence);color:var(--evidence);background:rgba(255,194,26,.07)}
+}
+.showall:active{transform:scale(var(--m-press))}
 .showall[hidden]{display:none}
 
 .table-scroll{overflow-x:auto;position:relative;z-index:1}
@@ -622,9 +776,13 @@ html.has-reveal tr.reveal.is-in{animation:rowIn .62s var(--e-out) var(--d,0ms) b
 }
 .lineup tbody td:first-child{border-radius:11px 0 0 11px;border-left:1px solid rgba(201,206,214,.07)}
 .lineup tbody td:last-child{border-radius:0 11px 11px 0;border-right:1px solid rgba(201,206,214,.07);text-align:right}
-.lineup tbody tr{transition:transform .62s var(--e-quint)}
-.lineup tbody td{transition:background-color .4s}
-.lineup tbody tr:hover td{background:rgba(255,255,255,.055)}
+/* FLIP's play phase lives here. flipRows() clears its inline transition to hand
+   control back to this rule, so the duration token is read at reorder time. */
+.lineup tbody tr{transition:transform var(--d-flip) var(--e-quint)}
+.lineup tbody td{transition:background-color var(--d-sm) var(--e-quart)}
+@media (hover:hover) and (pointer:fine){
+  .lineup tbody tr:hover td{background:rgba(255,255,255,.055)}
+}
 .caseno{font-family:var(--f-mono);font-size:14px;color:var(--muted);letter-spacing:.04em}
 .suspect{display:flex;align-items:center;gap:12px;min-width:0}
 .av{
@@ -659,6 +817,31 @@ html.has-reveal tr.reveal.is-in{animation:rowIn .62s var(--e-out) var(--d,0ms) b
 }
 tr.is-flash .row-score{animation:cellFlash 1s var(--e-out)}
 @keyframes cellFlash{0%{color:var(--evidence);text-shadow:0 0 16px rgba(255,194,26,.9)}100%{}}
+
+/* Rank delta. The data for this already existed in `prev` — it was just never
+   shown. Up is red because on this board red is the brand, not danger. */
+.delta{
+  display:inline-block;margin-left:9px;vertical-align:1px;
+  font-family:var(--f-label);font-size:8px;font-weight:700;letter-spacing:.1em;
+  padding:2px 6px;border-radius:999px;
+}
+.delta--up{color:#FF8894;background:rgba(255,42,61,.13);border:1px solid rgba(255,42,61,.4)}
+.delta--down{color:#9DBAFF;background:rgba(47,107,255,.12);border:1px solid rgba(47,107,255,.36)}
+.delta--new{color:var(--evidence);background:rgba(255,194,26,.12);border:1px solid rgba(255,194,26,.4)}
+html.has-reveal .delta{animation:deltaIn var(--d-lg) var(--e-out) both}
+@keyframes deltaIn{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:none}}
+
+/* Panel heading rules wipe in from the left as the panel arrives (Paradigm). */
+html.has-reveal .lineup-panel .table-scroll{--rule:0}
+html.has-reveal .lineup-panel.is-in .table-scroll{--rule:1}
+.lineup thead th{position:relative}
+.lineup thead th::after{
+  content:"";position:absolute;left:0;right:0;bottom:0;height:1px;
+  background:linear-gradient(90deg,var(--red),transparent);
+  transform:scaleX(var(--rule,1));transform-origin:left center;
+  transition:transform var(--d-intro) var(--e-out) 160ms;
+}
+.lineup thead th:not(:first-child)::after{background:linear-gradient(90deg,rgba(201,206,214,.3),transparent)}
 .nomatch td{
   text-align:center;padding:26px;color:var(--muted);
   font-family:var(--f-label);font-size:10px;font-weight:700;letter-spacing:.2em;text-transform:uppercase;
@@ -669,7 +852,7 @@ tr.is-flash .row-score{animation:cellFlash 1s var(--e-out)}
 .sk::after{
   content:"";position:absolute;inset:0;
   background:linear-gradient(90deg,transparent,rgba(47,107,255,.26),rgba(255,42,61,.2),transparent);
-  animation:scan 1.5s linear infinite;
+  animation:scan var(--d-blink) linear infinite;
 }
 @keyframes scan{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
 .sk-mug{aspect-ratio:1;border-radius:var(--r-card)}
@@ -688,8 +871,21 @@ tr.is-flash .row-score{animation:cellFlash 1s var(--e-out)}
    and the blocks actually read as a silhouette. */
 .foot-glow{position:absolute;inset:auto 0 0;height:clamp(180px,24vw,320px);pointer-events:none}
 .foot-glow::before,.foot-glow::after{content:"";position:absolute;bottom:0;width:62%;height:100%}
-.foot-glow::before{left:0;background:radial-gradient(54% 60% at 26% 88%,rgba(255,42,61,.5),rgba(255,42,61,.12) 48%,transparent 74%);animation:sirenA 11s ease-in-out infinite}
-.foot-glow::after{right:0;background:radial-gradient(54% 60% at 74% 88%,rgba(47,107,255,.5),rgba(47,107,255,.12) 48%,transparent 74%);animation:sirenB 11s ease-in-out infinite}
+.foot-glow::before{left:0;background:radial-gradient(54% 60% at 26% 88%,rgba(255,42,61,.5),rgba(255,42,61,.12) 48%,transparent 74%);animation:sirenA var(--d-siren) ease-in-out infinite}
+.foot-glow::after{right:0;background:radial-gradient(54% 60% at 74% 88%,rgba(47,107,255,.5),rgba(47,107,255,.12) 48%,transparent 74%);animation:sirenB var(--d-siren) ease-in-out infinite}
+/* The skyline lights up block by block as the footer arrives — the one piece of
+   motion that exists purely for pleasure. Opacity on <g>, so it composites. */
+html.has-reveal .skyline .win-layer rect{opacity:0}
+html.has-reveal .foot.is-in .skyline .win-layer rect{
+  animation:winsOn var(--d-lg) var(--e-out) both;
+  animation-delay:calc(240ms + var(--i,0) * 70ms);
+}
+.win-layer rect:nth-child(1){--i:4}  .win-layer rect:nth-child(2){--i:7}
+.win-layer rect:nth-child(3){--i:1}  .win-layer rect:nth-child(4){--i:9}
+.win-layer rect:nth-child(5){--i:3}  .win-layer rect:nth-child(6){--i:6}
+.win-layer rect:nth-child(7){--i:0}  .win-layer rect:nth-child(8){--i:8}
+.win-layer rect:nth-child(9){--i:2}  .win-layer rect:nth-child(10){--i:5}
+@keyframes winsOn{from{opacity:0}to{opacity:1}}
 /* Sits in the sky, clear of the rooflines, not on top of the windows. */
 .foot-line{
   position:relative;z-index:2;text-align:center;
@@ -768,18 +964,62 @@ tr.is-flash .row-score{animation:cellFlash 1s var(--e-out)}
   .av{width:31px;height:31px;font-size:11px}
   .row-score{font-size:16px}
   .stamp{font-size:30px;right:-14px}
-}
 
+  /* Mobile motion story: feedback over spectacle. No parallax (JS skips it
+     below 768px anyway), no window wave, and the condense is dropped because
+     the wordmark is already small enough to need every pixel. */
+  .skyline .win-layer rect{animation:none;opacity:1}
+  html.is-condensed .topbar .wordmark{transform:none}
+  html.is-condensed .topbar .brand-sub{opacity:1;transform:none}
+}
+/* Kill the 300ms tap delay and stop double-tap zoom on controls. */
+button,.dz-btn,.showall,label[for=file],#q{touch-action:manipulation}
+
+/* ============================================================
+   Reduced motion
+   "Reduced" is not "none". Movement goes; comprehension cues stay.
+   Opacity and colour still transition, focus rings still work, and
+   the board stays legible — it simply stops travelling.
+   ============================================================ */
 @media (prefers-reduced-motion:reduce){
-  *,*::before,*::after{
-    animation-duration:.001ms!important;animation-iteration-count:1!important;
-    transition-duration:.001ms!important;
+  :root{
+    --m-rise:0px;          /* reveals fade in place instead of rising */
+    --m-press:1;
+    --m-lift:0px;
+    --m-stagger:0ms;
+    --d-reveal:200ms;      /* the canonical reduced-motion crossfade */
+    --d-intro:200ms;
+    --d-flip:1ms;
   }
-  .rec i{opacity:1}
+  /* Zero the stagger as well as the duration. The old block left --d intact,
+     so a reduced-motion visitor still waited up to 600ms for the last row. */
+  html.has-reveal .reveal,html.has-reveal .reveal:not(tr).is-in,
+  html.has-reveal tr.reveal.is-in{transition-delay:0ms!important;animation-delay:0ms!important}
+
+  /* Decorative travel and looping spectacle: off. */
+  .bg-red,.bg-blue,.foot-glow::before,.foot-glow::after,
+  .sirenbar,.sk::after,.card.is-siren .mug,.skyline .win-layer rect{
+    animation:none!important;
+  }
+  .skyline .win-layer rect{opacity:1!important}
+  .mug:hover img,.mug:hover .initials{transform:none!important}
+  .tape-progress{display:none}
+  html.is-condensed .topbar .wordmark{transform:none}
+
+  /* Zeroing animation-duration does NOT stop a scroll-driven animation — its
+     progress comes from scroll position, not elapsed time. Detach the timeline
+     or the reveal keeps scrubbing. This is the easy one to miss. */
+  *,*::before,*::after{animation-timeline:auto!important}
+  ::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}
+
+  /* The REC dot stops blinking but must stay visible — it is a status light. */
+  .rec i{opacity:1;animation:none!important}
 }
 </style>
 </head>
 <body>
+
+<div class="tape-progress" aria-hidden="true"></div>
 
 <div class="bg" aria-hidden="true">
   <div class="bg-halftone"></div>
@@ -938,7 +1178,7 @@ tr.is-flash .row-score{animation:cellFlash 1s var(--e-out)}
         <rect x="724" y="58" width="92" height="122"/><rect x="824" y="86" width="112" height="94"/>
         <rect x="944" y="38" width="108" height="142"/><rect x="1060" y="78" width="140" height="102"/>
       </g>
-      <g fill="url(#win)">
+      <g fill="url(#win)" class="win-layer">
         <rect x="0" y="74" width="132" height="106"/><rect x="140" y="44" width="104" height="136"/>
         <rect x="252" y="92" width="88" height="88"/><rect x="348" y="26" width="120" height="154"/>
         <rect x="476" y="66" width="96" height="114"/><rect x="580" y="12" width="136" height="168"/>
@@ -1268,30 +1508,79 @@ const TBODIES = ["rows", "fcrows"];
 
 /* FLIP, across both tables. Keys are namespaced by tbody because the same pair
    appears in the lineup and in the full case file. */
+/* DOCUMENT-relative, not viewport-relative. The old version stored
+   rect.top, then the podium or the state card toggled `hidden` in the same
+   render and changed the height of everything above the tables — so every row
+   inherited that delta as a phantom dy and slid for no reason. Adding scrollY
+   makes the measurement immune to layout shifts above it. */
 function measureRows() {
   const m = new Map();
+  const y = scrollY;
   for (const id of TBODIES) {
     for (const tr of $(id).children) {
-      if (tr.dataset.id) m.set(id + "|" + tr.dataset.id, tr.getBoundingClientRect().top);
+      if (tr.dataset.id) {
+        m.set(id + "|" + tr.dataset.id, tr.getBoundingClientRect().top + y);
+      }
     }
   }
   return m;
 }
+
+const FLIP_ID = "flip-row";
+
 function flipRows(before) {
+  const y = scrollY;
   for (const id of TBODIES) {
-    for (const tr of $(id).children) {
+    const kids = Array.from($(id).children);
+
+    // Read every rect first, then write. Interleaving a read and a write per
+    // row forces one synchronous layout per row.
+    const now = kids.map((tr) => tr.getBoundingClientRect().top + y);
+
+    kids.forEach((tr, i) => {
+      if (!tr.dataset.id) return;
       const y0 = before.get(id + "|" + tr.dataset.id);
-      if (y0 === undefined) continue;
-      const dy = y0 - tr.getBoundingClientRect().top;
-      if (!dy) continue;
-      tr.style.transition = "none";
-      tr.style.transform = `translateY(${dy}px)`;
-      requestAnimationFrame(() => {
-        tr.style.transition = "";
-        tr.style.transform = "";
-      });
-    }
+
+      if (y0 === undefined) {
+        // A row with no previous position is ENTERING. It used to get nothing.
+        if (firstPaint || reduced.matches) return;
+        tr.animate(
+          [{ opacity: 0, transform: "translateY(-6px)" },
+           { opacity: 1, transform: "none" }],
+          { duration: 260, easing: "cubic-bezier(.23,1,.32,1)", id: FLIP_ID }
+        );
+        return;
+      }
+
+      const dy = y0 - now[i];
+      if (Math.abs(dy) < 0.5) return;
+
+      // Cancel any FLIP still in flight so a refresh landing mid-animation
+      // retargets instead of fighting the previous pass.
+      for (const a of tr.getAnimations()) if (a.id === FLIP_ID) a.cancel();
+
+      // Scale duration with travel: a one-place swap should not take as long
+      // as a ten-place climb, or small moves feel sluggish.
+      const dur = Math.min(900, 320 + Math.abs(dy) * 0.45);
+      tr.animate(
+        [{ transform: `translateY(${dy}px)` }, { transform: "translateY(0)" }],
+        { duration: dur, easing: "cubic-bezier(.22,1,.36,1)", id: FLIP_ID }
+      );
+    });
   }
+}
+
+/* Coalesce renders to one per frame. Typing in the search box called render()
+   synchronously per keystroke, and a full innerHTML rebuild of both tables was
+   measured at ~20ms — over the 16ms frame budget before any of this motion
+   existed. Data refreshes still render immediately; only input-rate callers
+   need coalescing. */
+let renderQueued = false;
+let lastQuery = "";
+function scheduleRender() {
+  if (renderQueued) return;
+  renderQueued = true;
+  requestAnimationFrame(() => { renderQueued = false; render(); });
 }
 
 function render() {
@@ -1306,7 +1595,20 @@ function render() {
   countEl.dataset.score = rows.length;
   countEl.textContent = fmt(rows.length);
 
-  const before = !firstPaint && !reduced.matches ? measureRows() : null;
+  /* Searching is a high-frequency, keyboard-driven action, and Emil's gate is
+     explicit about those: reduce or remove. Filtering also cannot reorder the
+     ranking — it only hides rows — so sliding the survivors is motion without
+     meaning. Skipping it also drops measureRows() from the keystroke path,
+     which profiling showed was 10ms of a 22ms render: the single most
+     expensive thing the search box was doing. */
+  const queryChanged = query !== lastQuery;
+  lastQuery = query;
+
+  const animating = !firstPaint && !reduced.matches && !queryChanged;
+  const before = animating ? measureRows() : null;
+  // Where each promoted pair is coming FROM, captured before the rebuild wipes
+  // the row it currently lives in.
+  const fromRects = animating ? capturePromotions(podiumRows) : null;
 
   renderState(preEvent);
   renderPodium(podiumRows, preEvent, isFirst);
@@ -1314,6 +1616,10 @@ function render() {
   renderFullCase(preEvent, isFirst);
 
   if (before) flipRows(before);
+  if (fromRects && fromRects.size) flyPromotions(fromRects);
+  if (animating) announceMoves();
+  // Arm the string draw for the first real paint only.
+  if (isFirst && !reduced.matches) drawString.animate = true;
 
   // remember for the next diff
   const next = new Map();
@@ -1324,6 +1630,88 @@ function render() {
   if (haveData) firstPaint = false;
   armReveals(isFirst);
   requestAnimationFrame(drawString);
+}
+
+/* Every visual signal on a refresh — the slide, the ghost, the flash, the delta
+   chip — is unavailable to a screen reader. Announce the headline instead of
+   the diff: a polite region reading 31 row changes would be unusable. */
+function announceMoves() {
+  const live = $("live");
+  if (!live) return;
+  const moved = rows
+    .map((r) => ({ r, was: prev.get(r.id) }))
+    .filter(({ r, was }) => was && was.rank !== r.rank)
+    .sort((a, b) => (a.was.rank - a.r.rank < b.was.rank - b.r.rank ? 1 : -1));
+  if (!moved.length) return;
+
+  const top = moved[0];
+  const places = Math.abs(top.was.rank - top.r.rank);
+  const dir = top.was.rank > top.r.rank ? "up" : "down";
+  const rest = moved.length - 1;
+  live.textContent =
+    `${top.r.name} moved ${dir} ${places} ${places === 1 ? "place" : "places"} to number ${top.r.rank}.`
+    + (rest ? ` ${rest} other ${rest === 1 ? "pair" : "pairs"} also moved.` : "");
+}
+
+/* ---- Podium promotion -------------------------------------------------
+   A pair breaking into the top three used to simply vanish from the table and
+   reappear as a card, with a box-shadow flash as the only acknowledgement.
+   It is the most dramatic thing a leaderboard does, so it gets the budget:
+   measure the row they are leaving, then fly a ghost to the card they land in.
+   The ghost is position:fixed and WAAPI-driven, so it never touches layout. */
+function capturePromotions(podiumRows) {
+  const out = new Map();
+  for (const r of podiumRows) {
+    const was = prev.get(r.id);
+    if (!was || was.rank <= 3) continue;          // already on the podium
+    const row = document.querySelector(`#rows tr[data-id="${cssEsc(r.id)}"]`);
+    if (!row) continue;
+    const rect = row.getBoundingClientRect();
+    if (rect.width && rect.bottom > 0 && rect.top < innerHeight) {
+      out.set(r.id, { rect, name: r.name, score: r.score, from: was.rank, to: r.rank });
+    }
+  }
+  return out;
+}
+
+function flyPromotions(fromRects) {
+  for (const [id, info] of fromRects) {
+    const card = document.querySelector(`#podium .card[data-id="${cssEsc(id)}"] .mug`);
+    if (!card) continue;
+    const to = card.getBoundingClientRect();
+    if (!to.width) continue;
+
+    const ghost = document.createElement("p");
+    ghost.className = "ghost";
+    ghost.setAttribute("aria-hidden", "true");
+    ghost.innerHTML = `${esc(info.name)} <b>#${info.to}</b>`;
+    Object.assign(ghost.style, {
+      left: `${info.rect.left}px`,
+      top: `${info.rect.top}px`,
+      width: `${info.rect.width}px`,
+      height: `${info.rect.height}px`,
+      fontSize: "16px",
+    });
+    document.body.appendChild(ghost);
+
+    const dx = (to.left + to.width / 2) - (info.rect.left + info.rect.width / 2);
+    const dy = (to.top + to.height / 2) - (info.rect.top + info.rect.height / 2);
+    const scale = Math.max(.35, to.width / info.rect.width);
+
+    ghost.animate(
+      [{ transform: "translate(0,0) scale(1)", opacity: 0 },
+       { transform: `translate(${dx * .5}px,${dy * .5}px) scale(${(1 + scale) / 2})`,
+         opacity: 1, offset: .35 },
+       { transform: `translate(${dx}px,${dy}px) scale(${scale})`, opacity: 0 }],
+      { duration: 820, easing: "cubic-bezier(.22,1,.36,1)" }
+    ).finished.then(() => ghost.remove(), () => ghost.remove());
+  }
+}
+
+/* CSS.escape isn't universal in older Safari; ids here are lowercased
+   name||partner, so quotes and backslashes are the only real hazards. */
+function cssEsc(v) {
+  return window.CSS && CSS.escape ? CSS.escape(v) : String(v).replace(/["\\]/g, "\\$&");
 }
 
 function renderState(preEvent) {
@@ -1432,6 +1820,8 @@ function renderPodium(top, preEvent, isFirst) {
     card.setAttribute("aria-label",
       `Rank ${r.rank}. ${r.name}${r.partner ? " with " + r.partner : ""}. ${fmt(r.score)} points.`);
 
+    card.dataset.id = r.id;            // flyPromotions targets this
+
     if (matches(r)) card.classList.add("is-match");
     if (!reduced.matches && !firstPaint) {
       if (was && was.score !== r.score) card.classList.add("is-flash");
@@ -1439,9 +1829,18 @@ function renderPodium(top, preEvent, isFirst) {
     }
     if (isFirst) {
       card.classList.add("reveal");
-      card.style.setProperty("--d", `${i * 90}ms`);
+      // Build the podium from third place up to first, so the eye lands on the
+      // winner last. `i` walks the DOM order 2,1,3 — rank gives the beat.
+      card.style.setProperty("--d", `${(3 - slot) * 110}ms`);
     }
     host.appendChild(card);
+
+    // On a refresh, roll the score from its old value rather than leaving it to
+    // snap. countUp is otherwise first-paint-only (armed via countIO).
+    if (!isFirst && was && was.score !== r.score && !reduced.matches) {
+      const el = card.querySelector(".score");
+      if (el) { el.dataset.armed = "1"; countUp(el, was.score); }
+    }
   });
 
   // 5. status pill over the #1 plinth
@@ -1466,6 +1865,22 @@ function statusFor(rank, preEvent) {
   return ["surv", "Under Surveillance"];
 }
 
+/* How far a pair moved since the last refresh. `prev` already held the old
+   rank — it was only ever used to decide whether to flash, never shown. The
+   chip is the non-decorative half of the reorder: the slide says "something
+   moved", this says how far. Suppressed on the first paint, when every pair
+   would read as new. */
+function deltaHtml(r, was, preEvent) {
+  if (preEvent || firstPaint) return "";
+  if (!was) return `<span class="delta delta--new" title="New to the board">NEW</span>`;
+  const d = was.rank - r.rank;
+  if (!d) return "";
+  const dir = d > 0 ? "up" : "down";
+  const places = Math.abs(d) === 1 ? "1 place" : `${Math.abs(d)} places`;
+  return `<span class="delta delta--${dir}" title="${d > 0 ? "Up" : "Down"} ${places}">`
+       + `${d > 0 ? "▲" : "▼"}${Math.abs(d)}</span>`;
+}
+
 /* One row, shared by both tables. `role` replaces the status chip for the
    podium three; `reveal` is only set on the first paint. */
 function rowHtml(r, { preEvent, role = "", top = false, delay = 0, reveal = false }) {
@@ -1474,7 +1889,7 @@ function rowHtml(r, { preEvent, role = "", top = false, delay = 0, reveal = fals
   const [sc, sl] = role ? ["role", role] : statusFor(r.rank, preEvent);
   const cls = [changed && "is-flash", top && "is-top", reveal && "reveal"].filter(Boolean).join(" ");
   return `<tr data-id="${esc(r.id)}"${cls ? ` class="${cls}"` : ""}${reveal ? ` style="--d:${delay}ms"` : ""}>
-      <td><span class="caseno">${preEvent ? "—" : "#" + String(r.rank).padStart(3, "0")}</span></td>
+      <td><span class="caseno">${preEvent ? "—" : "#" + String(r.rank).padStart(3, "0")}</span>${deltaHtml(r, was, preEvent)}</td>
       <td>
         <div class="suspect">
           <span class="av" aria-hidden="true">${esc(initials(r.name, r.partner))}</span>
@@ -1485,8 +1900,21 @@ function rowHtml(r, { preEvent, role = "", top = false, delay = 0, reveal = fals
         </div>
       </td>
       <td class="col-status"><span class="status-chip ${sc}">${sl}</span></td>
-      <td><span class="row-score">${fmt(r.score)}</span></td>
+      <td><span class="row-score"${changed ? ` data-score="${r.score}" data-from="${was.score}"` : ""}>${fmt(r.score)}</span></td>
     </tr>`;
+}
+
+/* Roll any row score that changed this refresh. Only changed rows tween, so
+   this is a handful of numbers rather than all 31 — running tweens on every
+   row every minute would be pointless work and visual noise. */
+function tweenChangedScores(body) {
+  if (reduced.matches) return;
+  for (const el of body.querySelectorAll(".row-score[data-from]")) {
+    const from = Number(el.dataset.from);
+    el.removeAttribute("data-from");
+    el.dataset.armed = "1";
+    countUp(el, from);
+  }
 }
 
 const skeletonRows = (n) => Array.from({ length: n }, () =>
@@ -1521,6 +1949,7 @@ function renderTable(list, preEvent, isFirst) {
         preEvent, delay: Math.min(i * 40, 400), reveal: isFirst,
       })).join("")
     : noRow(query ? "No suspect matches that name" : "No one else in the lineup");
+  tweenChangedScores(body);
 }
 
 /* Everybody, rank 1 down, always expanded. */
@@ -1550,27 +1979,136 @@ function renderFullCase(preEvent, isFirst) {
         });
       }).join("")
     : noRow("No suspect matches that name");
+  tweenChangedScores(body);
 }
 
 /* ============================================================
    Motion — Lenis smooth scroll, scroll reveals, count-up
    ============================================================ */
 let revealIO = null, countIO = null;
+let lenis = null, tickerId = 0;
+const DESKTOP = () => matchMedia("(min-width: 768px)").matches;
+/* Native scroll timelines drive the progress tape on the compositor. Firefox
+   only ships them on 2026-10-27, so the ticker fallback is load-bearing. */
+const NATIVE_TIMELINE = window.CSS && CSS.supports
+  && CSS.supports("animation-timeline", "scroll()");
+
+/* One rAF loop for the whole page. Lenis used to own its own (autoRaf), and
+   countUp spawned one per number — separate clocks drift visibly against each
+   other. Everything that needs a frame now registers here instead. */
+const frameTasks = new Set();
+function startTicker() {
+  if (tickerId) return;
+  const frame = (t) => {
+    if (lenis) lenis.raf(t);
+    for (const task of frameTasks) task(t);
+    tickerId = requestAnimationFrame(frame);
+  };
+  tickerId = requestAnimationFrame(frame);
+}
+function stopTicker() {
+  if (tickerId) cancelAnimationFrame(tickerId);
+  tickerId = 0;
+}
+/* Nothing animates in a background tab; the siren loops would just burn battery
+   on a phone in someone's pocket for five days. */
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) stopTicker();
+  else if (frameTasks.size || lenis) startTicker();
+});
+
+/* Scroll state. No layout reads in here — only custom-property writes and class
+   toggles — because this runs on every frame Lenis is interpolating. */
+let scrolledState = false, condensedState = false;
+function onScrollFrame() {
+  const y = lenis ? lenis.animatedScroll : scrollY;
+  const root = document.documentElement;
+  const scrolled = y > 24;
+  if (scrolled !== scrolledState) {
+    scrolledState = scrolled;
+    root.classList.toggle("is-scrolled", scrolled);
+  }
+  const condensed = y > 120;
+  if (condensed !== condensedState) {
+    condensedState = condensed;
+    root.classList.toggle("is-condensed", condensed);
+  }
+  if (!NATIVE_TIMELINE) {
+    const max = document.documentElement.scrollHeight - innerHeight;
+    root.style.setProperty("--sp", max > 0 ? (y / max).toFixed(4) : "0");
+  }
+}
+
+/* Depth parallax, deliberately confined to the fixed decorative background.
+   It is tempting to drift the podium too, but drawString() and measureRows()
+   both read live rects — a translated board would pin the red string to stale
+   coordinates and feed FLIP a phantom delta. The halftone layers are
+   aria-hidden and participate in no measurement, so they are free.
+   Capped at 12px: `ui-ux-pro-max` requires parallax be sparing and
+   non-disorienting, and this reads as depth rather than movement. */
+const PARALLAX_MAX = 12;
+let parallaxEls = [];
+function parallaxFrame() {
+  const y = lenis ? lenis.animatedScroll : scrollY;
+  const max = document.documentElement.scrollHeight - innerHeight;
+  const p = max > 0 ? Math.min(1, y / max) : 0;
+  for (const { el, depth } of parallaxEls) {
+    el.style.transform = `translate3d(0,${(p * PARALLAX_MAX * depth).toFixed(2)}px,0)`;
+  }
+}
+
+function initLenis() {
+  if (lenis || !SMOOTH_SCROLL || reduced.matches || typeof Lenis === "undefined"
+      || !DESKTOP()) return;
+  lenis = new Lenis({
+    duration: 0.8,
+    smoothWheel: true,
+    allowNestedScroll: true,
+    autoRaf: false,            // the shared ticker drives it now
+    easing: (t) => 1 - Math.pow(1 - t, 3),
+  });
+}
+function destroyLenis() {
+  if (!lenis) return;
+  lenis.destroy();
+  lenis = null;
+}
+
+/* The preference used to be read once at boot, so toggling it mid-event did
+   nothing until a reload. Re-apply it live: tear the smooth scroll down or
+   bring it back, and let the CSS media query handle the rest. */
+reduced.addEventListener?.("change", () => {
+  if (reduced.matches) {
+    destroyLenis();
+    frameTasks.delete(onScrollFrame);
+    document.documentElement.classList.remove("is-condensed", "is-scrolled");
+    if (!frameTasks.size) stopTicker();
+  } else {
+    initMotion();
+  }
+});
 
 function initMotion() {
-  if (SMOOTH_SCROLL && !reduced.matches && typeof Lenis !== "undefined"
-      && matchMedia("(min-width: 768px)").matches) {
-    new Lenis({
-      duration: 0.8,
-      smoothWheel: true,
-      allowNestedScroll: true,
-      autoRaf: true,
-      easing: (t) => 1 - Math.pow(1 - t, 3),
-    });
-  }
+  initLenis();
 
   if (reduced.matches || !("IntersectionObserver" in window)) return;
   document.documentElement.classList.add("has-reveal");
+  frameTasks.add(onScrollFrame);
+  startTicker();
+
+  // Desktop only. On a phone, parallax reads as jitter and costs battery for
+  // five days of event — and Lenis is off below 768px anyway.
+  if (DESKTOP()) {
+    parallaxEls = [
+      [".bg-halftone", 1], [".bg-halftone2", -1.4], [".bg-print", .6],
+    ].map(([sel, depth]) => ({ el: document.querySelector(sel), depth }))
+     .filter(({ el }) => el);
+    if (parallaxEls.length) frameTasks.add(parallaxFrame);
+  }
+
+  // Re-entrant: a reduced-motion toggle calls this again. Keep the existing
+  // observers rather than orphaning elements that were armed against them.
+  if (revealIO) return;
 
   // ScrollTrigger's `start: 'top 90%', once: true` is exactly this: shrink the
   // root's bottom edge by 10%, then stop observing after the first hit.
@@ -1594,6 +2132,8 @@ function initMotion() {
   }, { rootMargin: "0px", threshold: 0 });
 }
 
+let staggerIndex = 0;
+
 /* Arm anything newly rendered. Counters are armed on the first data paint
    only, so refreshed scores show their value instead of ticking up again. */
 function armReveals(armCounters) {
@@ -1601,6 +2141,13 @@ function armReveals(armCounters) {
   for (const el of document.querySelectorAll(".reveal:not(.is-in)")) {
     if (el.dataset.armed) continue;
     el.dataset.armed = "1";
+    /* Static panels never received a stagger, so everything above the fold
+       arrived in one slab. Give each panel its own beat — capped at 10 so a
+       long page can't push the last item a second and a half late. */
+    if (!el.style.getPropertyValue("--d") && el.tagName !== "TR") {
+      const i = Math.min(staggerIndex++, 9);
+      el.style.setProperty("--d", `${i * 60}ms`);
+    }
     revealIO.observe(el);
   }
   if (!armCounters) return;
@@ -1612,25 +2159,43 @@ function armReveals(armCounters) {
   }
 }
 
-/* Count one number up from zero. Novaform's exact timing: 1.2s, power1.out,
-   which is GSAP's quadratic ease-out. */
-function countUp(el) {
+/* Count a number toward its target. Novaform's exact timing: 1.2s, power1.out,
+   which is GSAP's quadratic ease-out.
+
+   `from` lets a refresh tween from the OLD score rather than from zero, so a
+   score going 6,800 -> 7,200 rolls those 400 points instead of resetting to 0
+   and climbing the whole way back. Re-entrant: a second call mid-flight
+   retargets from whatever is on screen rather than restarting. */
+const tweens = new WeakMap();
+function countUp(el, from) {
   const target = Number(el.dataset.score);
   if (!Number.isFinite(target)) return;
+
+  const live = tweens.get(el);
+  if (live) frameTasks.delete(live);
+
+  const start = Number.isFinite(from) ? from : 0;
+  if (reduced.matches || start === target) { el.textContent = fmt(target); return; }
+
   const dur = 1200;
   let t0 = null;
-  el.textContent = "0";
+  el.textContent = fmt(start);
   const step = (t) => {
     // Seed from the first frame's own timestamp. rAF reports the frame START,
     // which can predate a performance.now() taken moments earlier — that made
     // progress briefly negative and flashed a negative score on screen.
     if (t0 === null) t0 = t;
     const p = Math.max(0, Math.min(1, (t - t0) / dur));
-    el.textContent = fmt(Math.round(target * (1 - Math.pow(1 - p, 2))));
-    if (p < 1) requestAnimationFrame(step);
-    else el.textContent = fmt(target);
+    const v = start + (target - start) * (1 - Math.pow(1 - p, 2));
+    // Only write when the rendered string actually changes: at 60fps this is
+    // ~70 writes over 1.2s, but most of them render the same text.
+    const s = fmt(Math.round(v));
+    if (el.textContent !== s) el.textContent = s;
+    if (p >= 1) { el.textContent = fmt(target); frameTasks.delete(step); tweens.delete(el); }
   };
-  requestAnimationFrame(step);
+  tweens.set(el, step);
+  frameTasks.add(step);
+  startTicker();
 }
 
 /* red string and push pins between the three mugshots */
@@ -1661,6 +2226,38 @@ function drawString() {
     order.map((p) =>
       `<circle cx="${p.x}" cy="${p.y}" r="5" fill="#FF2A3D" stroke="#fff" stroke-width="1.4"/>`
     ).join("");
+
+  if (drawString.animate && !reduced.matches) {
+    drawString.animate = false;
+    animateString(svg);
+  }
+}
+
+/* Draw the string on, then pop each pin as the stroke reaches it. Runs once,
+   at the end of the intro — drawString() is also called on every refresh and
+   on resize, and re-drawing it each time would be a nervous tic. */
+function animateString(svg) {
+  const path = svg.querySelector("path");
+  const pins = svg.querySelectorAll("circle");
+  if (!path || !path.getTotalLength) return;
+  const len = path.getTotalLength();
+  if (!len) return;
+
+  const DRAW = 900;
+  path.animate(
+    [{ strokeDasharray: `${len}`, strokeDashoffset: len },
+     { strokeDasharray: `${len}`, strokeDashoffset: 0 }],
+    { duration: DRAW, easing: "cubic-bezier(.16,1,.3,1)", fill: "none" }
+  );
+  pins.forEach((pin, i) => {
+    // Pins sit at the ends of each segment, so spread them across the draw.
+    const at = pins.length > 1 ? (i / (pins.length - 1)) * DRAW * 0.82 : 0;
+    pin.animate(
+      [{ opacity: 0, transform: "scale(.4)" },
+       { opacity: 1, transform: "scale(1)" }],
+      { duration: 260, delay: at, easing: "cubic-bezier(.23,1,.32,1)", fill: "backwards" }
+    );
+  });
 }
 
 /* ============================================================
@@ -1668,7 +2265,7 @@ function drawString() {
    ============================================================ */
 $("q").addEventListener("input", (e) => {
   query = low(e.target.value);
-  render();
+  scheduleRender();          // coalesced: one rebuild per frame, not per keypress
 });
 addEventListener("keydown", (e) => {
   const el = document.activeElement;
